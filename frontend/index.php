@@ -53,7 +53,11 @@ if ($result->num_rows > 0) {
 </head>
 <body>
     <div class="container">
-        <h1>Robotics Team Attendance</h1>
+        <div class="header">
+            <img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo">
+            <h1>TiGears - Attendance Tracker</h1>
+            <img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo">
+        </div>
         <p class="instructions">Tap your name and then tap Sign In or Sign Out</p>
 
         <div id="message" class="message"></div>
