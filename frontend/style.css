@@ -97,6 +97,109 @@ h1 {
     border: 2px solid #f5c6cb;
 }
 
+/* Numeric Keypad */
+.keypad-container {
+    background: #f8f9fa;
+    border: 3px solid #667eea;
+    border-radius: 15px;
+    padding: 25px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+.keypad-title {
+    text-align: center;
+    color: #333;
+    margin-bottom: 20px;
+    font-size: 1.3em;
+}
+
+.keypad-display {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+#studentIdInput {
+    flex: 1;
+    padding: 15px;
+    font-size: 1.5em;
+    text-align: center;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    letter-spacing: 3px;
+}
+
+.keypad-clear {
+    padding: 15px 25px;
+    font-size: 1em;
+    font-weight: bold;
+    background: #f44336;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    touch-action: manipulation;
+}
+
+.keypad-clear:hover {
+    background: #da190b;
+}
+
+.keypad-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.keypad-btn {
+    padding: 25px;
+    font-size: 1.8em;
+    font-weight: bold;
+    background: white;
+    color: #333;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.keypad-btn:hover {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.keypad-btn:active {
+    transform: translateY(0);
+}
+
+.keypad-backspace {
+    background: #FF9800;
+    color: white;
+    border-color: #FF9800;
+}
+
+.keypad-backspace:hover {
+    background: #F57C00;
+    border-color: #F57C00;
+}
+
+.keypad-empty {
+    background: transparent;
+    border: none;
+    cursor: default;
+    pointer-events: none;
+}
+
 /* Action buttons */
 .action-buttons {
     display: flex;

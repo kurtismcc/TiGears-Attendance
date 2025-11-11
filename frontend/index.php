@@ -62,9 +62,31 @@ if ($result->num_rows > 0) {
 
         <div id="message" class="message"></div>
 
-        <div class="action-buttons" id="actionButtons" style="display: none;">
-            <button class="action-button confirm" id="confirmBtn">Confirm</button>
-            <button class="action-button cancel" id="cancelBtn">Cancel</button>
+        <!-- Numeric Keypad for Student ID -->
+        <div class="keypad-container" id="keypadContainer" style="display: none;">
+            <h3 class="keypad-title">Enter Your Student ID</h3>
+            <div class="keypad-display">
+                <input type="text" id="studentIdInput" readonly placeholder="Enter ID">
+                <button class="keypad-clear" id="clearBtn">Clear</button>
+            </div>
+            <div class="keypad-grid">
+                <button class="keypad-btn" data-value="1">1</button>
+                <button class="keypad-btn" data-value="2">2</button>
+                <button class="keypad-btn" data-value="3">3</button>
+                <button class="keypad-btn" data-value="4">4</button>
+                <button class="keypad-btn" data-value="5">5</button>
+                <button class="keypad-btn" data-value="6">6</button>
+                <button class="keypad-btn" data-value="7">7</button>
+                <button class="keypad-btn" data-value="8">8</button>
+                <button class="keypad-btn" data-value="9">9</button>
+                <button class="keypad-btn keypad-backspace" data-value="backspace">⌫</button>
+                <button class="keypad-btn" data-value="0">0</button>
+                <button class="keypad-btn keypad-empty"></button>
+            </div>
+            <div class="action-buttons">
+                <button class="action-button confirm" id="confirmBtn">Confirm</button>
+                <button class="action-button cancel" id="cancelBtn">Cancel</button>
+            </div>
         </div>
 
         <div class="student-lists">

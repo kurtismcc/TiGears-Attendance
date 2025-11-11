@@ -2,13 +2,18 @@
 let selectedStudentId = null;
 let selectedStudentButton = null;
 let selectedStudentStatus = null;
+let enteredStudentId = '';
 
 // Get DOM elements
 const studentButtons = document.querySelectorAll('.student-item');
-const actionButtons = document.getElementById('actionButtons');
+const keypadContainer = document.getElementById('keypadContainer');
 const confirmBtn = document.getElementById('confirmBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const messageDiv = document.getElementById('message');
+const studentIdInput = document.getElementById('studentIdInput');
+const clearBtn = document.getElementById('clearBtn');
+const keypadButtons = document.querySelectorAll('.keypad-btn');
+const studentLists = document.querySelector('.student-lists');
 
 // Add click event to all student buttons
 studentButtons.forEach(button => {
@@ -24,6 +29,15 @@ studentButtons.forEach(button => {
         selectedStudentButton = this;
         this.classList.add('selected');
 
+        // Clear any previous message
+        hideMessage();
+
+        // Show keypad and hide student lists
+        enteredStudentId = '';
+        studentIdInput.value = '';
+        keypadContainer.style.display = 'block';
+        studentLists.style.display = 'none';
+
         // Update confirm button text based on status
         if (selectedStudentStatus === 'in') {
             confirmBtn.textContent = 'Confirm Sign Out';
@@ -36,24 +50,48 @@ studentButtons.forEach(button => {
             confirmBtn.className = 'action-button confirm sign-in';
         }
 
-        // Show action buttons
-        actionButtons.style.display = 'flex';
-
-        // Clear any previous message
-        hideMessage();
-
-        // Scroll action buttons into view
-        actionButtons.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Scroll keypad into view
+        keypadContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
+});
+
+// Keypad button clicks
+keypadButtons.forEach(button => {
+    button.addEventListener('click', function() {
+        const value = this.getAttribute('data-value');
+
+        if (value === 'backspace') {
+            enteredStudentId = enteredStudentId.slice(0, -1);
+        } else if (value && value !== 'backspace') {
+            enteredStudentId += value;
+        }
+
+        studentIdInput.value = enteredStudentId;
+    });
+});
+
+// Clear button
+clearBtn.addEventListener('click', function() {
+    enteredStudentId = '';
+    studentIdInput.value = '';
 });
 
 // Confirm button
 confirmBtn.addEventListener('click', function() {
-    if (selectedStudentId && selectedStudentStatus) {
-        // Determine action based on current status
-        let action = (selectedStudentStatus === 'in') ? 'out' : 'in';
-        recordAttendance(selectedStudentId, action);
+    if (!selectedStudentId || !selectedStudentStatus) return;
+
+    // Validate student ID
+    if (enteredStudentId !== selectedStudentId) {
+        showMessage('Incorrect ID', 'error');
+        setTimeout(() => {
+            clearSelection();
+        }, 3000);
+        return;
     }
+
+    // Determine action based on current status
+    let action = (selectedStudentStatus === 'in') ? 'out' : 'in';
+    recordAttendance(selectedStudentId, action);
 });
 
 // Cancel button
@@ -119,7 +157,11 @@ function clearSelection() {
     selectedStudentId = null;
     selectedStudentButton = null;
     selectedStudentStatus = null;
-    actionButtons.style.display = 'none';
+    enteredStudentId = '';
+    studentIdInput.value = '';
+    keypadContainer.style.display = 'none';
+    studentLists.style.display = 'grid';
+    hideMessage();
 }
 
 // Prevent double-tap zoom on buttons
