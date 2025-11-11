@@ -3,7 +3,7 @@ let selectedStudentId = null;
 let selectedStudentButton = null;
 
 // Get DOM elements
-const studentButtons = document.querySelectorAll('.student-button');
+const studentButtons = document.querySelectorAll('.student-item');
 const actionButtons = document.getElementById('actionButtons');
 const signInBtn = document.getElementById('signInBtn');
 const signOutBtn = document.getElementById('signOutBtn');
@@ -28,6 +28,9 @@ studentButtons.forEach(button => {
 
         // Clear any previous message
         hideMessage();
+
+        // Scroll action buttons into view
+        actionButtons.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
 });
 
@@ -67,6 +70,10 @@ function recordAttendance(studentId, action) {
         if (data.success) {
             showMessage(data.message, 'success');
             clearSelection();
+            // Reload page after 2 seconds to update student lists
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
         } else {
             showMessage('Error: ' + data.message, 'error');
         }
@@ -82,8 +89,13 @@ function showMessage(message, type) {
     messageDiv.textContent = message;
     messageDiv.className = 'message show ' + type;
 
-    // Auto-hide message after 3 seconds
-    setTimeout(hideMessage, 3000);
+    // Scroll message into view
+    messageDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Don't auto-hide if page will reload
+    if (type === 'error') {
+        setTimeout(hideMessage, 3000);
+    }
 }
 
 // Function to hide message
