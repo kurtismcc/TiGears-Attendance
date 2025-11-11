@@ -123,16 +123,51 @@ Alternatively, you can install them as Windows services:
 
 ---
 
-## Step 5: Copy Project Files to Web Server
+## Step 5: Deploy Project Files to Web Server
 
-### Copy Files to XAMPP Directory
+### Using the Deployment Script
 
-1. Open File Explorer and navigate to `C:\xampp\htdocs\`
-2. Create a new folder called `attendance`
-3. Copy the contents of `d:\VHSTigears\Attendance\` to `C:\xampp\htdocs\attendance\`
-   - You should have `frontend\`, `backend\`, `docs\`, and `README.md` in there
+The project includes a deployment script that makes it easy to copy files to your web server.
 
-**Important Note:** The files in `C:\xampp\htdocs\attendance\` are the ones the web server will use. If you make changes to your files in `d:\VHSTigears\Attendance\`, you'll need to copy them over again, or work directly in the htdocs folder.
+1. Open **Command Prompt** (Windows key + R, type `cmd`, press Enter)
+2. Navigate to your project directory:
+   ```cmd
+   cd d:\VHSTigears\Attendance
+   ```
+3. Run the deployment script with your XAMPP htdocs path:
+   ```cmd
+   tools\deploy.bat C:\xampp\htdocs\attendance
+   ```
+4. The script will:
+   - Create the destination directory if it doesn't exist (prompts for confirmation)
+   - Copy `frontend\`, `backend\`, `docs\`, and `README.md` to the destination
+   - Display a success message when complete
+
+**Example output:**
+```
+========================================
+Robotics Attendance Deployment Script
+========================================
+
+Source: d:\VHSTigears\Attendance
+Destination: C:\xampp\htdocs\attendance
+
+Copying files...
+
+[1/3] Copying frontend files...
+   - frontend files copied successfully
+[2/3] Copying backend files...
+   - backend files copied successfully
+[3/3] Copying documentation...
+   - README.md copied
+   - docs directory copied
+
+========================================
+Deployment completed successfully!
+========================================
+```
+
+**Important Note:** Whenever you make changes to files in `d:\VHSTigears\Attendance\`, run the deploy script again to update the web server files. The script will overwrite old files with the updated versions.
 
 ---
 
