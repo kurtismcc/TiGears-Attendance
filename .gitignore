@@ -1,0 +1,28 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# Database configuration (contains credentials)
+backend/config.php
+
+# PHP configuration
+.htaccess
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+error_log
+
+# Temporary files
+*.tmp
+*.temp
