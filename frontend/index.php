@@ -63,7 +63,7 @@ if ($result->num_rows > 0) {
         <div class="header">
             <img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo">
             <h1>TiGears - Attendance Tracker</h1>
-            <img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo">
+            <a href="admin.php"><img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo"></a>
         </div>
         <p class="instructions">Tap your name and then tap Sign In or Sign Out</p>
 
