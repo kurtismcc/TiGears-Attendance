@@ -244,6 +244,254 @@ function awardTodayTime($students, $attendance) {
     return $result;
 }
 
+/**
+ * Calculate most consecutive days attended (only counting in-window sign-ins)
+ * Returns top 10 students by longest streak of consecutive attendance days
+ */
+function awardConsecutiveDays($students, $attendance, $windows) {
+    $studentNames = [];
+    foreach ($students as $student) {
+        $studentNames[$student['student_id']] = $student['name'];
+    }
+
+    // Group sign-ins by student, only counting in-window ones
+    $studentDays = [];
+    foreach ($attendance as $record) {
+        if ($record['action'] !== 'in') continue;
+
+        $sid = $record['student_id'];
+        $timestamp = $record['timestamp'];
+
+        // Check if this sign-in is within a window
+        if (!isInWindow($timestamp, $windows)) continue;
+
+        $date = date('Y-m-d', strtotime($timestamp));
+        if (!isset($studentDays[$sid])) {
+            $studentDays[$sid] = [];
+        }
+        $studentDays[$sid][$date] = true;
+    }
+
+    // Calculate max consecutive days for each student
+    $maxStreaks = [];
+    foreach ($studentDays as $sid => $days) {
+        $dates = array_keys($days);
+        sort($dates);
+
+        $maxStreak = 0;
+        $currentStreak = 0;
+        $prevDate = null;
+
+        foreach ($dates as $date) {
+            if ($prevDate === null) {
+                $currentStreak = 1;
+            } else {
+                $diff = (strtotime($date) - strtotime($prevDate)) / 86400;
+                if ($diff == 1) {
+                    $currentStreak++;
+                } else {
+                    $currentStreak = 1;
+                }
+            }
+            $maxStreak = max($maxStreak, $currentStreak);
+            $prevDate = $date;
+        }
+
+        $maxStreaks[$sid] = $maxStreak;
+    }
+
+    arsort($maxStreaks);
+
+    $result = [];
+    $count = 0;
+    foreach ($maxStreaks as $sid => $streak) {
+        if ($streak > 0 && $count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => $streak . ' days'
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Calculate on-time percentage (only for in-window sign-ins)
+ * Returns top 10 students by percentage of on-time arrivals
+ */
+function awardOnTimePercentage($students, $attendance, $windows) {
+    $studentNames = [];
+    foreach ($students as $student) {
+        $studentNames[$student['student_id']] = $student['name'];
+    }
+
+    // Count on-time and total in-window sign-ins per student
+    $stats = [];
+    foreach ($attendance as $record) {
+        if ($record['action'] !== 'in') continue;
+
+        $sid = $record['student_id'];
+        $timestamp = $record['timestamp'];
+
+        // Check if in window and get status
+        $status = getWindowStatus($timestamp, $windows);
+        if ($status === 'outside_window') continue;
+
+        if (!isset($stats[$sid])) {
+            $stats[$sid] = ['on_time' => 0, 'total' => 0];
+        }
+        $stats[$sid]['total']++;
+        if ($status === 'on_time') {
+            $stats[$sid]['on_time']++;
+        }
+    }
+
+    // Calculate percentages
+    $percentages = [];
+    foreach ($stats as $sid => $data) {
+        if ($data['total'] > 0) {
+            $percentages[$sid] = [
+                'pct' => ($data['on_time'] / $data['total']) * 100,
+                'total' => $data['total']
+            ];
+        }
+    }
+
+    // Sort by percentage descending, then by total descending
+    uasort($percentages, function($a, $b) {
+        if ($a['pct'] != $b['pct']) {
+            return $b['pct'] <=> $a['pct'];
+        }
+        return $b['total'] <=> $a['total'];
+    });
+
+    $result = [];
+    $count = 0;
+    foreach ($percentages as $sid => $data) {
+        if ($count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => round($data['pct']) . '%'
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Calculate total in-window time only
+ * Returns top 10 students by cumulative time spent signed in during valid windows
+ */
+function awardInWindowTime($students, $attendance, $windows) {
+    $studentNames = [];
+    $studentTimes = [];
+    foreach ($students as $student) {
+        $studentNames[$student['student_id']] = $student['name'];
+        $studentTimes[$student['student_id']] = 0;
+    }
+
+    // Group attendance by student
+    $studentAttendance = [];
+    foreach ($attendance as $record) {
+        $sid = $record['student_id'];
+        if (!isset($studentAttendance[$sid])) {
+            $studentAttendance[$sid] = [];
+        }
+        $studentAttendance[$sid][] = $record;
+    }
+
+    // Calculate in-window time for each student
+    foreach ($studentAttendance as $sid => $records) {
+        usort($records, function($a, $b) {
+            return strtotime($a['timestamp']) - strtotime($b['timestamp']);
+        });
+
+        $signInTime = null;
+        $signInTimestamp = null;
+        foreach ($records as $record) {
+            if ($record['action'] === 'in') {
+                $signInTime = strtotime($record['timestamp']);
+                $signInTimestamp = $record['timestamp'];
+            } elseif ($record['action'] === 'out' && $signInTime !== null) {
+                $signOutTime = strtotime($record['timestamp']);
+                // Only count if the sign-in was in window
+                if (isInWindow($signInTimestamp, $windows)) {
+                    $studentTimes[$sid] += ($signOutTime - $signInTime);
+                }
+                $signInTime = null;
+                $signInTimestamp = null;
+            }
+        }
+
+        // If still signed in and it was in-window, count time until now
+        if ($signInTime !== null && isInWindow($signInTimestamp, $windows)) {
+            $studentTimes[$sid] += (time() - $signInTime);
+        }
+    }
+
+    arsort($studentTimes);
+
+    $result = [];
+    $count = 0;
+    foreach ($studentTimes as $sid => $seconds) {
+        if ($seconds > 0 && $count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => formatTime($seconds)
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Helper: Check if a timestamp falls within any attendance window
+ */
+function isInWindow($timestamp, $windows) {
+    $dt = new DateTime($timestamp);
+    $dayOfWeek = (int)$dt->format('w');
+    $time = $dt->format('H:i:s');
+
+    foreach ($windows as $window) {
+        if ($window['day_of_week'] == $dayOfWeek &&
+            $time >= $window['start_time'] &&
+            $time <= $window['end_time']) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Helper: Get status (on_time, late, outside_window) for a timestamp
+ */
+function getWindowStatus($timestamp, $windows) {
+    $dt = new DateTime($timestamp);
+    $dayOfWeek = (int)$dt->format('w');
+    $time = $dt->format('H:i:s');
+
+    foreach ($windows as $window) {
+        if ($window['day_of_week'] == $dayOfWeek &&
+            $time >= $window['start_time'] &&
+            $time <= $window['end_time']) {
+            // Check grace period (uses GRACE_PERIOD_MINUTES from config)
+            $graceEnd = date('H:i:s', strtotime($window['start_time'] . ' +' . GRACE_PERIOD_MINUTES . ' minutes'));
+            if ($time <= $graceEnd) {
+                return 'on_time';
+            } else {
+                return 'late';
+            }
+        }
+    }
+    return 'outside_window';
+}
+
 // ============================================================================
 // BOX POPULATION FUNCTIONS
 // These functions control what each box displays.
@@ -252,35 +500,29 @@ function awardTodayTime($students, $attendance) {
 
 /**
  * Populate the LEFT award box
- * Currently shows: Top 10 Total Time (all-time)
- *
- * TO CHANGE: Replace awardTotalTime() with your own award function
+ * Currently shows: Most Consecutive Days
  */
-function populateLeftBox($students, $attendance) {
-    $items = awardTotalTime($students, $attendance);
-    renderAwardBox("Top 10 Total Time", "total-time-title", $items);
+function populateLeftBox($students, $attendance, $windows = []) {
+    $items = awardConsecutiveDays($students, $attendance, $windows);
+    renderAwardBox("Consecutive Days", "total-time-title", $items);
 }
 
 /**
  * Populate the MIDDLE award box
- * Currently shows: Top 10 Most Sign-Ins
- *
- * TO CHANGE: Replace awardMostSignIns() with your own award function
+ * Currently shows: On-Time Percentage
  */
-function populateMiddleBox($students, $attendance) {
-    $items = awardMostSignIns($students, $attendance);
-    renderAwardBox("Top 10 Most Sign-Ins", "most-signins-title", $items);
+function populateMiddleBox($students, $attendance, $windows = []) {
+    $items = awardOnTimePercentage($students, $attendance, $windows);
+    renderAwardBox("On-Time %", "most-signins-title", $items);
 }
 
 /**
  * Populate the RIGHT award box
- * Currently shows: Top 10 Time Today
- *
- * TO CHANGE: Replace awardTodayTime() with your own award function
+ * Currently shows: Total In-Window Time
  */
-function populateRightBox($students, $attendance) {
-    $items = awardTodayTime($students, $attendance);
-    renderAwardBox("Top 10 Time Today", "today-time-title", $items);
+function populateRightBox($students, $attendance, $windows = []) {
+    $items = awardInWindowTime($students, $attendance, $windows);
+    renderAwardBox("Total Time", "today-time-title", $items);
 }
 
 // ============================================================================
@@ -289,7 +531,7 @@ function populateRightBox($students, $attendance) {
 
 /**
  * Load all data needed for awards from the database
- * Returns: ['students' => array, 'attendance' => array]
+ * Returns: ['students' => array, 'attendance' => array, 'windows' => array]
  */
 function loadAwardData($conn) {
     // Load all students
@@ -310,9 +552,19 @@ function loadAwardData($conn) {
         }
     }
 
+    // Load attendance windows
+    $windows = [];
+    $result = $conn->query("SELECT day_of_week, start_time, end_time FROM attendance_windows");
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $windows[] = $row;
+        }
+    }
+
     return [
         'students' => $students,
-        'attendance' => $attendance
+        'attendance' => $attendance,
+        'windows' => $windows
     ];
 }
 ?>
