@@ -146,15 +146,19 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
             padding: 20px;
         }
 
-        .back-link {
-            display: inline-block;
+        .nav-links {
             margin-bottom: 20px;
+        }
+
+        .nav-links a {
+            display: inline-block;
             color: #667eea;
             text-decoration: none;
             font-weight: 600;
+            margin-right: 20px;
         }
 
-        .back-link:hover {
+        .nav-links a:hover {
             text-decoration: underline;
         }
 
@@ -180,7 +184,10 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
 </head>
 <body>
     <div class="container">
-        <a href="index.php" class="back-link">&larr; Back to Attendance</a>
+        <div class="nav-links">
+            <a href="index.php">&larr; Back to Attendance</a>
+            <a href="admin_student.php">Edit Student Records</a>
+        </div>
 
         <div class="header">
             <h1>Manage Attendance Windows</h1>
