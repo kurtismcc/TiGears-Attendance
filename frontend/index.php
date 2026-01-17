@@ -86,6 +86,26 @@ if ($result->num_rows > 0) {
         <!-- Numeric Keypad for Student ID -->
         <div class="keypad-container" id="keypadContainer" style="display: none;">
             <h3 class="keypad-title">Enter Your Student ID</h3>
+
+            <!-- Student standings display -->
+            <div class="student-standings" id="studentStandings">
+                <div class="standing-item">
+                    <span class="standing-label">Consecutive</span>
+                    <span class="standing-rank" id="standingConsecutiveRank">-</span>
+                    <span class="standing-value" id="standingConsecutiveValue">-</span>
+                </div>
+                <div class="standing-item">
+                    <span class="standing-label">Score</span>
+                    <span class="standing-rank" id="standingScoreRank">-</span>
+                    <span class="standing-value" id="standingScoreValue">-</span>
+                </div>
+                <div class="standing-item">
+                    <span class="standing-label">Time</span>
+                    <span class="standing-rank" id="standingTimeRank">-</span>
+                    <span class="standing-value" id="standingTimeValue">-</span>
+                </div>
+            </div>
+
             <div class="keypad-display">
                 <input type="text" id="studentIdInput" readonly placeholder="Enter ID">
                 <button class="keypad-clear" id="clearBtn">Clear</button>

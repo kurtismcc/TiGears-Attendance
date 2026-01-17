@@ -50,6 +50,9 @@ studentButtons.forEach(button => {
             confirmBtn.className = 'action-button confirm sign-in';
         }
 
+        // Fetch and display student standings
+        fetchStudentStandings(selectedStudentId);
+
         // Scroll keypad into view
         keypadContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
@@ -171,3 +174,31 @@ document.querySelectorAll('button').forEach(button => {
         this.click();
     }, { passive: false });
 });
+
+// Function to fetch and display student standings
+function fetchStudentStandings(studentId) {
+    // Reset standings display
+    document.getElementById('standingConsecutiveRank').textContent = '-';
+    document.getElementById('standingConsecutiveValue').textContent = '-';
+    document.getElementById('standingScoreRank').textContent = '-';
+    document.getElementById('standingScoreValue').textContent = '-';
+    document.getElementById('standingTimeRank').textContent = '-';
+    document.getElementById('standingTimeValue').textContent = '-';
+
+    fetch(`../backend/student_standings.php?student_id=${encodeURIComponent(studentId)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const s = data.standings;
+                document.getElementById('standingConsecutiveRank').textContent = s.consecutive.rank;
+                document.getElementById('standingConsecutiveValue').textContent = s.consecutive.value;
+                document.getElementById('standingScoreRank').textContent = s.score.rank;
+                document.getElementById('standingScoreValue').textContent = s.score.value;
+                document.getElementById('standingTimeRank').textContent = s.time.rank;
+                document.getElementById('standingTimeValue').textContent = s.time.value;
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching standings:', error);
+        });
+}

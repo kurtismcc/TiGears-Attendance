@@ -239,8 +239,50 @@ h1 {
 .keypad-title {
     text-align: center;
     color: #333;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     font-size: 1.3em;
+}
+
+/* Student standings in keypad */
+.student-standings {
+    display: flex;
+    justify-content: space-around;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 8px;
+}
+
+.standing-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: white;
+    flex: 1;
+}
+
+.standing-label {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    opacity: 0.9;
+    margin-bottom: 4px;
+}
+
+.standing-rank {
+    font-size: 1.4em;
+    font-weight: bold;
+}
+
+.standing-rank::before {
+    content: '#';
+    font-size: 0.7em;
+    opacity: 0.8;
+}
+
+.standing-value {
+    font-size: 0.85em;
+    opacity: 0.9;
 }
 
 .keypad-display {
