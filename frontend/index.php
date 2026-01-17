@@ -2,11 +2,9 @@
 require_once '../backend/db.php';
 require_once 'awards.php';
 
-// Load data for awards (students, attendance, and windows)
-$awardData = loadAwardData($conn);
-$awardStudents = $awardData['students'];
-$awardAttendance = $awardData['attendance'];
-$awardWindows = $awardData['windows'];
+// Load transformed data for awards
+// This handles: window generation, time capping at window end, ignoring carry-over sign-ins
+$transformedData = loadAwardData($conn);
 
 // Query to get all students with their last attendance status
 $sql = "
@@ -55,6 +53,8 @@ if ($result->num_rows > 0) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Auto-refresh every 5 minutes to update awards (computed for completed windows only) -->
+    <meta http-equiv="refresh" content="300">
     <title>Robotics Team Attendance</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -71,10 +71,13 @@ if ($result->num_rows > 0) {
         <div class="awards-section">
             <?php
             // Each box is populated by a function in awards.php
-            // To change what a box displays, edit the corresponding function
-            populateLeftBox($awardStudents, $awardAttendance, $awardWindows);
-            populateMiddleBox($awardStudents, $awardAttendance, $awardWindows);
-            populateRightBox($awardStudents, $awardAttendance, $awardWindows);
+            // Using transformed data which properly handles:
+            // - Students who forget to sign out (capped at window end)
+            // - Sign-ins from previous day (ignored)
+            // - Consecutive attendance based on window occurrences, not calendar days
+            populateLeftBoxTransformed($transformedData);
+            populateMiddleBoxTransformed($transformedData);
+            populateRightBoxTransformed($transformedData);
             ?>
         </div>
 

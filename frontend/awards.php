@@ -5,13 +5,20 @@
  * This file contains all the award calculation functions and the box population system.
  *
  * HOW IT WORKS:
- * 1. Data is loaded once from the database (students + attendance_log)
- * 2. Award functions calculate rankings from this data
+ * 1. Data is loaded and transformed via window_transform.php
+ * 2. Award functions calculate rankings from the transformed per-window data
  * 3. Box functions (populateLeftBox, populateMiddleBox, populateRightBox) call award functions
  * 4. To change what's displayed, just change which award function a box calls
  *
+ * The transformed data structure ensures:
+ * - Students who forget to sign out are auto signed-out at window end
+ * - Sign-ins from a previous day don't carry over
+ * - Consecutive attendance is based on consecutive windows, not calendar days
+ *
  * See docs/AddAwards.md for instructions on adding new awards.
  */
+
+require_once 'window_transform.php';
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -245,8 +252,97 @@ function awardTodayTime($students, $attendance) {
 }
 
 /**
- * Calculate most consecutive days attended (only counting in-window sign-ins)
- * Returns top 10 students by longest streak of consecutive attendance days
+ * Calculate most consecutive windows attended
+ * Returns top 10 students by longest streak of consecutive window attendance
+ *
+ * NOTE: This uses window occurrences, not calendar days. If meetings are
+ * Tue/Thu/Sat, attending all three counts as 3 consecutive, even though
+ * the calendar days aren't consecutive.
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ * @return array Top 10 students with their streak counts
+ */
+function awardConsecutiveWindows($transformedData) {
+    $students = $transformedData['students'];
+    $studentWindows = $transformedData['student_windows'];
+    $windowOccurrences = $transformedData['window_occurrences'];
+
+    $studentNames = buildStudentNameLookup($students);
+
+    // Build list of window IDs in order (they're already sequential integers)
+    $windowIds = array_column($windowOccurrences, 'id');
+    sort($windowIds);
+
+    // Calculate max consecutive windows for each student
+    $maxStreaks = [];
+    foreach ($studentWindows as $sid => $windows) {
+        if (empty($windows)) {
+            $maxStreaks[$sid] = 0;
+            continue;
+        }
+
+        // Get the window IDs this student attended, sorted
+        $attendedIds = array_keys($windows);
+        sort($attendedIds);
+
+        // Only count windows that are in the completed set
+        $completedWindowIds = array_flip($windowIds);
+        $attendedIds = array_filter($attendedIds, function($id) use ($completedWindowIds) {
+            return isset($completedWindowIds[$id]);
+        });
+        $attendedIds = array_values($attendedIds);
+
+        if (empty($attendedIds)) {
+            $maxStreaks[$sid] = 0;
+            continue;
+        }
+
+        // Find position of each attended window in the full sequence
+        $positions = [];
+        foreach ($attendedIds as $wid) {
+            $pos = array_search($wid, $windowIds);
+            if ($pos !== false) {
+                $positions[] = $pos;
+            }
+        }
+        sort($positions);
+
+        // Calculate max consecutive positions
+        $maxStreak = 1;
+        $currentStreak = 1;
+
+        for ($i = 1; $i < count($positions); $i++) {
+            if ($positions[$i] == $positions[$i - 1] + 1) {
+                $currentStreak++;
+                $maxStreak = max($maxStreak, $currentStreak);
+            } else {
+                $currentStreak = 1;
+            }
+        }
+
+        $maxStreaks[$sid] = $maxStreak;
+    }
+
+    arsort($maxStreaks);
+
+    $result = [];
+    $count = 0;
+    foreach ($maxStreaks as $sid => $streak) {
+        if ($streak > 0 && $count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => $streak . ' meetings'
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * LEGACY: Calculate most consecutive days attended (only counting in-window sign-ins)
+ * @deprecated Use awardConsecutiveWindows() instead
  */
 function awardConsecutiveDays($students, $attendance, $windows) {
     $studentNames = [];
@@ -451,10 +547,130 @@ function awardInWindowTime($students, $attendance, $windows) {
 }
 
 /**
+ * Calculate on-time percentage using transformed data
+ * Returns top 10 students by percentage of on-time arrivals (completed windows only)
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ * @return array Top 10 students with their on-time percentage
+ */
+function awardOnTimePercentageTransformed($transformedData) {
+    $students = $transformedData['students'];
+    $studentWindows = $transformedData['student_windows'];
+    $completedWindowIds = array_flip(array_column($transformedData['window_occurrences'], 'id'));
+
+    $studentNames = buildStudentNameLookup($students);
+
+    // Count on-time and total windows per student (only completed windows)
+    $stats = [];
+    foreach ($studentWindows as $sid => $windows) {
+        $onTime = 0;
+        $total = 0;
+
+        foreach ($windows as $windowId => $record) {
+            // Only count completed windows
+            if (!isset($completedWindowIds[$windowId])) {
+                continue;
+            }
+
+            $total++;
+            if ($record['status'] === 'on_time') {
+                $onTime++;
+            }
+        }
+
+        if ($total > 0) {
+            $stats[$sid] = [
+                'pct' => ($onTime / $total) * 100,
+                'total' => $total
+            ];
+        }
+    }
+
+    // Sort by percentage descending, then by total descending
+    uasort($stats, function($a, $b) {
+        if ($a['pct'] != $b['pct']) {
+            return $b['pct'] <=> $a['pct'];
+        }
+        return $b['total'] <=> $a['total'];
+    });
+
+    $result = [];
+    $count = 0;
+    foreach ($stats as $sid => $data) {
+        if ($count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => round($data['pct']) . '%'
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Calculate total in-window time using transformed data
+ * Returns top 10 students by cumulative time spent signed in during completed windows
+ *
+ * This properly handles:
+ * - Students who forget to sign out (capped at window end)
+ * - Sign-ins that carry over from previous day (ignored)
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ * @return array Top 10 students with their total time
+ */
+function awardInWindowTimeTransformed($transformedData) {
+    $students = $transformedData['students'];
+    $studentWindows = $transformedData['student_windows'];
+    $completedWindowIds = array_flip(array_column($transformedData['window_occurrences'], 'id'));
+
+    $studentNames = buildStudentNameLookup($students);
+
+    // Sum up time for each student (only completed windows)
+    $studentTimes = [];
+    foreach ($students as $student) {
+        $studentTimes[$student['student_id']] = 0;
+    }
+
+    foreach ($studentWindows as $sid => $windows) {
+        foreach ($windows as $windowId => $record) {
+            // Only count completed windows
+            if (!isset($completedWindowIds[$windowId])) {
+                continue;
+            }
+
+            $studentTimes[$sid] += $record['total_seconds'];
+        }
+    }
+
+    arsort($studentTimes);
+
+    $result = [];
+    $count = 0;
+    foreach ($studentTimes as $sid => $seconds) {
+        if ($seconds > 0 && $count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => formatTime($seconds)
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+// ============================================================================
+// LEGACY HELPER FUNCTIONS (kept for backwards compatibility)
+// ============================================================================
+
+/**
  * Helper: Check if a timestamp falls within any attendance window
  *
  * A sign-in is considered "in window" if it's on a day with a window AND
  * the time is before the window end (can be before window start for on-time arrivals).
+ * @deprecated Use the transformed data structure instead
  */
 function isInWindow($timestamp, $windows) {
     $dt = new DateTime($timestamp);
@@ -512,8 +728,44 @@ function getWindowStatus($timestamp, $windows) {
 // ============================================================================
 
 /**
- * Populate the LEFT award box
- * Currently shows: Most Consecutive Days
+ * Populate the LEFT award box using transformed data
+ * Currently shows: Most Consecutive Windows (meetings)
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ */
+function populateLeftBoxTransformed($transformedData) {
+    $items = awardConsecutiveWindows($transformedData);
+    renderAwardBox("Consecutive Meetings", "total-time-title", $items);
+}
+
+/**
+ * Populate the MIDDLE award box using transformed data
+ * Currently shows: On-Time Percentage
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ */
+function populateMiddleBoxTransformed($transformedData) {
+    $items = awardOnTimePercentageTransformed($transformedData);
+    renderAwardBox("On-Time %", "most-signins-title", $items);
+}
+
+/**
+ * Populate the RIGHT award box using transformed data
+ * Currently shows: Total In-Window Time
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ */
+function populateRightBoxTransformed($transformedData) {
+    $items = awardInWindowTimeTransformed($transformedData);
+    renderAwardBox("Total Time", "today-time-title", $items);
+}
+
+// ============================================================================
+// LEGACY BOX POPULATION FUNCTIONS (kept for backwards compatibility)
+// ============================================================================
+
+/**
+ * @deprecated Use populateLeftBoxTransformed() instead
  */
 function populateLeftBox($students, $attendance, $windows = []) {
     $items = awardConsecutiveDays($students, $attendance, $windows);
@@ -521,8 +773,7 @@ function populateLeftBox($students, $attendance, $windows = []) {
 }
 
 /**
- * Populate the MIDDLE award box
- * Currently shows: On-Time Percentage
+ * @deprecated Use populateMiddleBoxTransformed() instead
  */
 function populateMiddleBox($students, $attendance, $windows = []) {
     $items = awardOnTimePercentage($students, $attendance, $windows);
@@ -530,8 +781,7 @@ function populateMiddleBox($students, $attendance, $windows = []) {
 }
 
 /**
- * Populate the RIGHT award box
- * Currently shows: Total In-Window Time
+ * @deprecated Use populateRightBoxTransformed() instead
  */
 function populateRightBox($students, $attendance, $windows = []) {
     $items = awardInWindowTime($students, $attendance, $windows);
@@ -543,41 +793,12 @@ function populateRightBox($students, $attendance, $windows = []) {
 // ============================================================================
 
 /**
- * Load all data needed for awards from the database
- * Returns: ['students' => array, 'attendance' => array, 'windows' => array]
+ * Load all data needed for awards from the database (using new transformed structure)
+ *
+ * @param mysqli $conn Database connection
+ * @return array The transformed data structure from loadTransformedData()
  */
 function loadAwardData($conn) {
-    // Load all students
-    $students = [];
-    $result = $conn->query("SELECT student_id, name FROM students");
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $students[] = $row;
-        }
-    }
-
-    // Load all attendance records
-    $attendance = [];
-    $result = $conn->query("SELECT student_id, timestamp, action FROM attendance_log ORDER BY timestamp ASC");
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $attendance[] = $row;
-        }
-    }
-
-    // Load attendance windows
-    $windows = [];
-    $result = $conn->query("SELECT day_of_week, start_time, end_time FROM attendance_windows");
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $windows[] = $row;
-        }
-    }
-
-    return [
-        'students' => $students,
-        'attendance' => $attendance,
-        'windows' => $windows
-    ];
+    return loadTransformedData($conn);
 }
 ?>
