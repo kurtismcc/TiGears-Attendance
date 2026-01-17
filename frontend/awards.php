@@ -547,9 +547,70 @@ function awardInWindowTime($students, $attendance, $windows) {
 }
 
 /**
+ * Calculate attendance score using weighted points
+ * On-time = 3 points, Late = 2 points, Miss = 0 points
+ *
+ * This rewards consistent attendance while still valuing punctuality.
+ * A student who attends 10 meetings (5 on-time, 5 late) scores 25 points,
+ * beating someone with 1 on-time attendance (3 points).
+ *
+ * @param array $transformedData The data from loadTransformedData()
+ * @return array Top 10 students with their weighted score
+ */
+function awardAttendanceScore($transformedData) {
+    $students = $transformedData['students'];
+    $studentWindows = $transformedData['student_windows'];
+    $completedWindowIds = array_flip(array_column($transformedData['window_occurrences'], 'id'));
+
+    $studentNames = buildStudentNameLookup($students);
+
+    // Point values
+    $onTimePoints = 3;
+    $latePoints = 2;
+
+    // Calculate score for each student (only completed windows)
+    $scores = [];
+    foreach ($studentWindows as $sid => $windows) {
+        $score = 0;
+
+        foreach ($windows as $windowId => $record) {
+            // Only count completed windows
+            if (!isset($completedWindowIds[$windowId])) {
+                continue;
+            }
+
+            if ($record['status'] === 'on_time') {
+                $score += $onTimePoints;
+            } else {
+                $score += $latePoints;
+            }
+        }
+
+        $scores[$sid] = $score;
+    }
+
+    arsort($scores);
+
+    $result = [];
+    $count = 0;
+    foreach ($scores as $sid => $score) {
+        if ($score > 0 && $count < 10) {
+            $result[] = [
+                'name' => $studentNames[$sid] ?? 'Unknown',
+                'value' => $score . ' pts'
+            ];
+            $count++;
+        }
+    }
+
+    return $result;
+}
+
+/**
  * Calculate on-time percentage using transformed data
  * Returns top 10 students by percentage of on-time arrivals (completed windows only)
  *
+ * @deprecated Use awardAttendanceScore() instead - percentage unfairly favors low attendance
  * @param array $transformedData The data from loadTransformedData()
  * @return array Top 10 students with their on-time percentage
  */
@@ -740,13 +801,13 @@ function populateLeftBoxTransformed($transformedData) {
 
 /**
  * Populate the MIDDLE award box using transformed data
- * Currently shows: On-Time Percentage
+ * Currently shows: Attendance Score (on-time=3pts, late=2pts)
  *
  * @param array $transformedData The data from loadTransformedData()
  */
 function populateMiddleBoxTransformed($transformedData) {
-    $items = awardOnTimePercentageTransformed($transformedData);
-    renderAwardBox("On-Time %", "most-signins-title", $items);
+    $items = awardAttendanceScore($transformedData);
+    renderAwardBox("Attendance Score", "most-signins-title", $items);
 }
 
 /**
