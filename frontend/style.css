@@ -454,9 +454,7 @@ h1 {
 .roster-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    padding: 12px;
-    background: #f8f9fa;
+    background: white;
     max-height: calc(100vh - 400px);
     min-height: 200px;
     overflow-y: auto;
@@ -465,35 +463,38 @@ h1 {
 .roster-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     background: white;
     color: #333;
-    border: 2px solid #ddd;
-    border-radius: 8px;
-    padding: 12px 14px;
+    border: none;
+    border-bottom: 1px solid #e0e0e0;
+    border-right: 1px solid #e0e0e0;
+    padding: 14px 16px;
     font-size: 0.95em;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+    transition: background-color 0.15s ease;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     text-align: left;
 }
 
+/* Remove right border on items in the second column */
+.roster-item:nth-child(2n) {
+    border-right: none;
+}
+
 .roster-item:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    background-color: #f5f5f5;
 }
 
 .roster-item:active {
-    transform: translateY(0);
+    background-color: #ebebeb;
 }
 
 .roster-item.selected {
     background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
     color: white;
-    border-color: #f5576c;
 }
 
 .roster-item.selected .roster-icon {
@@ -501,19 +502,25 @@ h1 {
 }
 
 .roster-icon {
-    font-size: 1.3em;
+    font-size: 1.4em;
     font-weight: bold;
     flex-shrink: 0;
-    width: 24px;
-    text-align: center;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
 }
 
 .roster-item.signed-in .roster-icon {
     color: #4CAF50;
+    background-color: rgba(76, 175, 80, 0.12);
 }
 
 .roster-item.signed-out .roster-icon {
     color: #f44336;
+    background-color: rgba(244, 67, 54, 0.12);
 }
 
 .roster-name {
