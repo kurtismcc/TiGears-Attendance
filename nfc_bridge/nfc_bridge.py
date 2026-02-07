@@ -128,6 +128,23 @@ def connect_to_card(reader):
         return None, None
 
 
+def _reset_rf_field(connection):
+    """
+    Toggle the ACR122U's RF antenna off and on to force the PN532
+    to drop its current target and re-detect cards from scratch.
+    Fixes stale state after failed communications (e.g. sending NTAG
+    commands to a MIFARE Classic card, or vice versa).
+    """
+    try:
+        # PN532 RFConfiguration: disable RF field
+        connection.transmit([0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x00])
+        time.sleep(0.1)
+        # PN532 RFConfiguration: enable RF field
+        connection.transmit([0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x01])
+    except Exception:
+        pass
+
+
 def _ntag_transceive(connection, cmd_bytes):
     """
     Send a native NFC command to the tag via ACR122U direct transmit
@@ -413,6 +430,8 @@ class BridgeState:
         self.last_scan_id: str | None = None
         self.last_scan_time: float = 0
         self.reader_connected: bool = False
+        self.last_error_event: str | None = None
+        self.last_error_time: float = 0
 
     def should_debounce(self, student_id: str) -> bool:
         now = time.time()
@@ -421,6 +440,19 @@ class BridgeState:
         self.last_scan_id = student_id
         self.last_scan_time = now
         return False
+
+    def should_debounce_error(self, event: str) -> bool:
+        """Suppress repeated error events from the same card sitting on the reader."""
+        now = time.time()
+        if event == self.last_error_event and (now - self.last_error_time) < config.DEBOUNCE_SECONDS:
+            return True
+        self.last_error_event = event
+        self.last_error_time = now
+        return False
+
+    def clear_error(self):
+        """Reset error debounce when a successful event occurs."""
+        self.last_error_event = None
 
 
 state = BridgeState()
@@ -505,44 +537,53 @@ def poll_nfc_blocking():
         return {"event": "no_card"}
 
     is_mifare = _is_mifare_classic(type_byte)
+    is_ntag = (type_byte == TAG_TYPE_NTAG)
 
-    # --- Write mode ---
-    if state.write_pending is not None:
-        student_id = state.write_pending
-        payload = make_payload(student_id)
+    try:
+        # --- Unsupported tag type ---
+        if not is_mifare and not is_ntag:
+            tag_name = TAG_TYPES.get(type_byte, "unknown")
+            _reset_rf_field(connection)
+            return {"event": "unsupported_tag", "tag_type": tag_name}
+
+        # --- Write mode ---
+        if state.write_pending is not None:
+            student_id = state.write_pending
+            payload = make_payload(student_id)
+            if is_mifare:
+                success = write_tag_data_mifare(connection, payload)
+            else:
+                success = write_tag_data(connection, payload)
+            state.write_pending = None
+            if not success:
+                _reset_rf_field(connection)
+            return {
+                "event": "write_result",
+                "success": success,
+                "student_id": student_id
+            }
+
+        # --- Read mode ---
         if is_mifare:
-            success = write_tag_data_mifare(connection, payload)
+            raw = read_tag_data_mifare(connection)
         else:
-            success = write_tag_data(connection, payload)
-        state.write_pending = None
+            raw = read_tag_data(connection)
+
+        if raw is None:
+            _reset_rf_field(connection)
+            return {"event": "empty_tag"}
+
+        student_id = verify_payload(raw)
+        if student_id is None:
+            return {"event": "invalid_tag", "raw": raw}
+
+        return {"event": "valid_tag", "student_id": student_id}
+
+    finally:
         try:
             connection.disconnect()
         except Exception:
             pass
-        return {
-            "event": "write_result",
-            "success": success,
-            "student_id": student_id
-        }
-
-    # --- Read mode ---
-    if is_mifare:
-        raw = read_tag_data_mifare(connection)
-    else:
-        raw = read_tag_data(connection)
-    try:
-        connection.disconnect()
-    except Exception:
-        pass
-
-    if raw is None:
-        return {"event": "empty_tag"}
-
-    student_id = verify_payload(raw)
-    if student_id is None:
-        return {"event": "invalid_tag", "raw": raw}
-
-    return {"event": "valid_tag", "student_id": student_id}
 
 
 async def nfc_poll_loop():
@@ -577,6 +618,7 @@ async def nfc_poll_loop():
 
         # Handle events
         if event == "write_result":
+            state.clear_error()
             await broadcast({
                 "type": "write_complete",
                 "success": result["success"],
@@ -588,14 +630,25 @@ async def nfc_poll_loop():
                 log.error("Tag write failed for student %s", result["student_id"])
 
         elif event == "valid_tag":
+            state.clear_error()
             student_id = result["student_id"]
             if not state.should_debounce(student_id):
                 await broadcast({"type": "tag_scan", "student_id": student_id})
                 log.info("Tag scanned: student %s", student_id)
 
         elif event == "invalid_tag":
-            await broadcast({"type": "error", "message": "Invalid or unsigned tag"})
-            log.warning("Invalid tag data: %s", result.get("raw", ""))
+            if not state.should_debounce_error("invalid_tag"):
+                await broadcast({"type": "error", "message": "Invalid or unsigned tag"})
+                log.warning("Invalid tag data: %s", result.get("raw", ""))
+
+        elif event == "unsupported_tag":
+            if not state.should_debounce_error("unsupported_tag"):
+                await broadcast({"type": "error", "message": f"Unsupported tag type: {result.get('tag_type', 'unknown')}"})
+                log.warning("Unsupported tag type: %s", result.get("tag_type", "unknown"))
+
+        elif event == "empty_tag":
+            if not state.should_debounce_error("empty_tag"):
+                log.debug("Empty or unreadable tag")
 
         await asyncio.sleep(config.POLL_INTERVAL)
 
