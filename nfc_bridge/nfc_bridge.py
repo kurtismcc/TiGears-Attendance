@@ -62,16 +62,27 @@ def verify_payload(payload: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Low-level ACR122U / NTAG communication
+# Low-level ACR122U / tag communication
 # ---------------------------------------------------------------------------
 
-# Known ATR tag-type byte (byte index 13 in standard ACR122U ATR)
+# Known ATR tag-type byte (found via PC/SC RID pattern)
+TAG_TYPE_NTAG = 0x44
+TAG_TYPE_MIFARE_1K = 0x01
+TAG_TYPE_MIFARE_4K = 0x02
+
 TAG_TYPES = {
-    0x44: "MIFARE Ultralight / NTAG",
-    0x01: "MIFARE Classic 1K",
-    0x02: "MIFARE Classic 4K",
+    TAG_TYPE_NTAG: "MIFARE Ultralight / NTAG",
+    TAG_TYPE_MIFARE_1K: "MIFARE Classic 1K",
+    TAG_TYPE_MIFARE_4K: "MIFARE Classic 4K",
     0x03: "MIFARE DESFire",
 }
+
+# MIFARE Classic default key A
+MIFARE_DEFAULT_KEY = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+
+# MIFARE Classic 1K data blocks (skip block 0 = manufacturer, skip sector trailers 3,7,11...)
+# Sector 1: blocks 4,5,6 (trailer=7)  Sector 2: blocks 8,9,10 (trailer=11)
+MIFARE_DATA_BLOCKS = [4, 5, 6, 8, 9, 10]
 
 
 def get_reader():
@@ -99,7 +110,11 @@ def _get_tag_type_byte(atr):
 
 
 def connect_to_card(reader):
-    """Try to connect to a card on the reader. Returns connection or None."""
+    """
+    Try to connect to a card on the reader.
+    Returns (connection, type_byte) on success, or (None, None) on failure.
+    type_byte is TAG_TYPE_NTAG, TAG_TYPE_MIFARE_1K, etc. or None if unknown.
+    """
     try:
         connection = reader.createConnection()
         connection.connect()
@@ -108,14 +123,9 @@ def connect_to_card(reader):
         type_byte = _get_tag_type_byte(atr)
         tag_type = TAG_TYPES.get(type_byte, f"unknown (0x{type_byte:02X})" if type_byte is not None else "unknown")
         log.info("Card detected — ATR: %s — Type: %s", atr_str, tag_type)
-        if type_byte is not None and type_byte != 0x44:
-            log.warning(
-                "This tag is %s, not NTAG/Ultralight. "
-                "Only NTAG213/215/216 tags are supported.", tag_type
-            )
-        return connection
+        return connection, type_byte
     except (NoCardException, CardConnectionException):
-        return None
+        return None, None
 
 
 def _ntag_transceive(connection, cmd_bytes):
@@ -216,6 +226,183 @@ def write_tag_data(connection, payload: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# MIFARE Classic communication
+# ---------------------------------------------------------------------------
+
+def _mifare_load_key(connection, key_bytes=MIFARE_DEFAULT_KEY, key_slot=0x00):
+    """
+    Load an authentication key into the ACR122U key store.
+    APDU: FF 82 00 <key_slot> 06 <6-byte key>
+    """
+    apdu = [0xFF, 0x82, 0x00, key_slot, 0x06] + list(key_bytes)
+    try:
+        data, sw1, sw2 = connection.transmit(apdu)
+    except CardConnectionException as e:
+        log.error("Load key transmit error: %s", e)
+        return False
+    if sw1 != 0x90 or sw2 != 0x00:
+        log.error("Load key failed: SW=%02X%02X", sw1, sw2)
+        return False
+    return True
+
+
+def _mifare_auth_block(connection, block, key_type=0x60, key_slot=0x00):
+    """
+    Authenticate a MIFARE Classic block using a loaded key.
+    APDU: FF 86 00 00 05 01 00 <block> <key_type> <key_slot>
+    key_type: 0x60 = Key A, 0x61 = Key B
+    """
+    apdu = [0xFF, 0x86, 0x00, 0x00, 0x05,
+            0x01, 0x00, block, key_type, key_slot]
+    try:
+        data, sw1, sw2 = connection.transmit(apdu)
+    except CardConnectionException as e:
+        log.error("Auth block %d transmit error: %s", block, e)
+        return False
+    if sw1 != 0x90 or sw2 != 0x00:
+        log.error("Auth block %d failed: SW=%02X%02X", block, sw1, sw2)
+        return False
+    return True
+
+
+def _mifare_read_block(connection, block):
+    """
+    Read 16 bytes from a MIFARE Classic block (must be authenticated first).
+    APDU: FF B0 00 <block> 10
+    Returns 16 bytes on success, None on failure.
+    """
+    apdu = [0xFF, 0xB0, 0x00, block, 0x10]
+    try:
+        data, sw1, sw2 = connection.transmit(apdu)
+    except CardConnectionException as e:
+        log.error("Read block %d transmit error: %s", block, e)
+        return None
+    if sw1 != 0x90 or sw2 != 0x00:
+        log.error("Read block %d failed: SW=%02X%02X", block, sw1, sw2)
+        return None
+    return list(data)
+
+
+def _mifare_write_block(connection, block, data_bytes):
+    """
+    Write 16 bytes to a MIFARE Classic block (must be authenticated first).
+    APDU: FF D6 00 <block> 10 <16 bytes>
+    data_bytes must be exactly 16 bytes.
+    """
+    if len(data_bytes) != 16:
+        log.error("Write block %d: data must be 16 bytes, got %d", block, len(data_bytes))
+        return False
+    apdu = [0xFF, 0xD6, 0x00, block, 0x10] + list(data_bytes)
+    try:
+        data, sw1, sw2 = connection.transmit(apdu)
+    except CardConnectionException as e:
+        log.error("Write block %d transmit error: %s", block, e)
+        return False
+    if sw1 != 0x90 or sw2 != 0x00:
+        log.error("Write block %d failed: SW=%02X%02X", block, sw1, sw2)
+        return False
+    return True
+
+
+def _sector_of_block(block):
+    """Return the sector number for a given block (MIFARE Classic 1K)."""
+    return block // 4
+
+
+def read_tag_data_mifare(connection) -> str | None:
+    """
+    Read user data from a MIFARE Classic tag.
+    Reads data blocks across sectors 1-2 (blocks 4,5,6,8,9,10).
+    Each block is 16 bytes, giving 96 bytes total.
+    """
+    if not _mifare_load_key(connection):
+        log.error("Failed to load MIFARE key")
+        return None
+
+    raw_bytes = []
+    last_sector = -1
+
+    for block in MIFARE_DATA_BLOCKS:
+        sector = _sector_of_block(block)
+        if sector != last_sector:
+            if not _mifare_auth_block(connection, block):
+                log.error("Failed to authenticate sector %d (block %d)", sector, block)
+                return None
+            last_sector = sector
+
+        data = _mifare_read_block(connection, block)
+        if data is None:
+            log.error("Failed to read block %d", block)
+            return None
+        raw_bytes.extend(data)
+
+    if not raw_bytes:
+        return None
+
+    # Find the null terminator
+    try:
+        end = raw_bytes.index(0x00)
+        raw_bytes = raw_bytes[:end]
+    except ValueError:
+        pass
+
+    if not raw_bytes:
+        return None
+
+    try:
+        return bytes(raw_bytes).decode("ascii").strip()
+    except (UnicodeDecodeError, ValueError):
+        return None
+
+
+def write_tag_data_mifare(connection, payload: str) -> bool:
+    """
+    Write an ASCII string payload to a MIFARE Classic tag.
+    Writes across data blocks in sectors 1-2 (blocks 4,5,6,8,9,10).
+    Max payload: 95 bytes (96 bytes minus null terminator).
+    """
+    data = list(payload.encode("ascii")) + [0x00]
+
+    max_capacity = len(MIFARE_DATA_BLOCKS) * 16
+    if len(data) > max_capacity:
+        log.error("Payload too large for MIFARE Classic: %d bytes (max %d)",
+                  len(data), max_capacity)
+        return False
+
+    # Pad to fill remaining blocks with zeros
+    while len(data) % 16 != 0:
+        data.append(0x00)
+
+    if not _mifare_load_key(connection):
+        log.error("Failed to load MIFARE key")
+        return False
+
+    last_sector = -1
+    block_idx = 0
+
+    for i in range(0, len(data), 16):
+        if block_idx >= len(MIFARE_DATA_BLOCKS):
+            break
+        block = MIFARE_DATA_BLOCKS[block_idx]
+        sector = _sector_of_block(block)
+
+        if sector != last_sector:
+            if not _mifare_auth_block(connection, block):
+                log.error("Failed to authenticate sector %d (block %d)", sector, block)
+                return False
+            last_sector = sector
+
+        chunk = data[i:i + 16]
+        if not _mifare_write_block(connection, block, chunk):
+            log.error("Write failed at block %d", block)
+            return False
+        log.debug("Wrote block %d OK", block)
+        block_idx += 1
+
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Bridge state
 # ---------------------------------------------------------------------------
 
@@ -299,6 +486,11 @@ async def handle_client(websocket):
 # NFC polling loop
 # ---------------------------------------------------------------------------
 
+def _is_mifare_classic(type_byte):
+    """Check if the tag type is MIFARE Classic (1K or 4K)."""
+    return type_byte in (TAG_TYPE_MIFARE_1K, TAG_TYPE_MIFARE_4K)
+
+
 def poll_nfc_blocking():
     """
     Blocking function that runs one poll cycle.
@@ -308,15 +500,20 @@ def poll_nfc_blocking():
     if reader is None:
         return {"event": "no_reader"}
 
-    connection = connect_to_card(reader)
+    connection, type_byte = connect_to_card(reader)
     if connection is None:
         return {"event": "no_card"}
+
+    is_mifare = _is_mifare_classic(type_byte)
 
     # --- Write mode ---
     if state.write_pending is not None:
         student_id = state.write_pending
         payload = make_payload(student_id)
-        success = write_tag_data(connection, payload)
+        if is_mifare:
+            success = write_tag_data_mifare(connection, payload)
+        else:
+            success = write_tag_data(connection, payload)
         state.write_pending = None
         try:
             connection.disconnect()
@@ -329,7 +526,10 @@ def poll_nfc_blocking():
         }
 
     # --- Read mode ---
-    raw = read_tag_data(connection)
+    if is_mifare:
+        raw = read_tag_data_mifare(connection)
+    else:
+        raw = read_tag_data(connection)
     try:
         connection.disconnect()
     except Exception:
