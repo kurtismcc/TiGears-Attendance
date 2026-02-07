@@ -398,6 +398,22 @@ If you have an ACR122U USB NFC reader, you can let students tap NFC tags to sign
 
 The NFC bridge service requires Python 3.10 or newer.
 
+#### Option A: Using winget (Recommended)
+
+1. Open **Command Prompt** or **PowerShell**
+2. Run:
+   ```cmd
+   winget install Python.Python.3.12
+   ```
+3. **Close and reopen** Command Prompt so the PATH update takes effect
+4. Verify by running:
+   ```cmd
+   python --version
+   ```
+   You should see something like `Python 3.12.x`
+
+#### Option B: Manual Download
+
 1. Go to: https://www.python.org/downloads/
 2. Download the latest **Python 3.x** installer for Windows
 3. **Important:** On the first installer screen, check **"Add python.exe to PATH"**

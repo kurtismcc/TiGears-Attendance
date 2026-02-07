@@ -65,6 +65,15 @@ def verify_payload(payload: str) -> str | None:
 # Low-level ACR122U / NTAG communication
 # ---------------------------------------------------------------------------
 
+# Known ATR tag-type byte (byte index 13 in standard ACR122U ATR)
+TAG_TYPES = {
+    0x44: "MIFARE Ultralight / NTAG",
+    0x01: "MIFARE Classic 1K",
+    0x02: "MIFARE Classic 4K",
+    0x03: "MIFARE DESFire",
+}
+
+
 def get_reader():
     """Return the first available PC/SC reader, or None."""
     r = readers()
@@ -78,27 +87,73 @@ def connect_to_card(reader):
     try:
         connection = reader.createConnection()
         connection.connect()
+        atr = connection.getATR()
+        atr_str = toHexString(atr)
+        tag_type = "unknown"
+        if len(atr) > 13:
+            tag_type = TAG_TYPES.get(atr[13], f"unknown (0x{atr[13]:02X})")
+        log.info("Card detected — ATR: %s — Type: %s", atr_str, tag_type)
+        if len(atr) > 13 and atr[13] != 0x44:
+            log.warning(
+                "This tag is %s, not NTAG/Ultralight. "
+                "Only NTAG213/215/216 tags are supported.", tag_type
+            )
         return connection
     except (NoCardException, CardConnectionException):
         return None
 
 
+def _ntag_transceive(connection, cmd_bytes):
+    """
+    Send a native NFC command to the tag via ACR122U direct transmit
+    (PN532 InCommunicateThru).  Returns response data bytes on success,
+    or None on failure.
+
+    The ACR122U escape APDU is: FF 00 00 00 <Lc> D4 42 <native_cmd>
+    PN532 responds with:        D5 43 <status> [data...]
+    Status 0x00 = success.
+    """
+    inner = [0xD4, 0x42] + list(cmd_bytes)
+    apdu = [0xFF, 0x00, 0x00, 0x00, len(inner)] + inner
+    try:
+        data, sw1, sw2 = connection.transmit(apdu)
+    except CardConnectionException as e:
+        log.error("Transmit error: %s", e)
+        return None
+
+    if sw1 != 0x90 or sw2 != 0x00:
+        log.error("APDU error: SW=%02X%02X", sw1, sw2)
+        return None
+
+    # Expect D5 43 <status> [payload...]
+    if len(data) < 3 or data[0] != 0xD5 or data[1] != 0x43:
+        log.error("Unexpected PN532 response: %s", toHexString(data))
+        return None
+
+    if data[2] != 0x00:
+        log.error("Tag command failed, PN532 status: 0x%02X", data[2])
+        return None
+
+    return data[3:]  # payload bytes (may be empty for WRITE)
+
+
 def read_tag_data(connection, max_pages=20) -> str | None:
     """
     Read user data from an NTAG tag (pages 4+).
-    Returns the decoded text payload, or None on failure.
+    Uses the native NTAG READ command (0x30) via PN532 InCommunicateThru.
+    Each READ returns 16 bytes (4 pages).
     """
     raw_bytes = []
-    for page in range(4, 4 + max_pages):
-        # READ command: FF B0 00 <page> 04 (read 4 bytes from page)
-        apdu = [0xFF, 0xB0, 0x00, page, 0x04]
-        try:
-            data, sw1, sw2 = connection.transmit(apdu)
-        except CardConnectionException:
+    page = 4
+    end_page = 4 + max_pages
+
+    while page < end_page:
+        # NTAG READ: 0x30 <page> — returns 16 bytes (4 pages)
+        resp = _ntag_transceive(connection, [0x30, page])
+        if resp is None:
             break
-        if sw1 != 0x90 or sw2 != 0x00:
-            break
-        raw_bytes.extend(data)
+        raw_bytes.extend(resp[:16])
+        page += 4  # READ returns 4 pages at a time
 
     if not raw_bytes:
         return None
@@ -122,7 +177,8 @@ def read_tag_data(connection, max_pages=20) -> str | None:
 def write_tag_data(connection, payload: str) -> bool:
     """
     Write an ASCII string payload to an NTAG tag starting at page 4.
-    Appends a null terminator. Returns True on success.
+    Uses the native NTAG WRITE command (0xA2) via PN532 InCommunicateThru.
+    Each WRITE sends 4 bytes (1 page).
     """
     data = list(payload.encode("ascii")) + [0x00]
 
@@ -133,16 +189,12 @@ def write_tag_data(connection, payload: str) -> bool:
     page = 4
     for i in range(0, len(data), 4):
         chunk = data[i:i + 4]
-        # WRITE command: FF D6 00 <page> 04 <4 bytes>
-        apdu = [0xFF, 0xD6, 0x00, page, 0x04] + chunk
-        try:
-            resp, sw1, sw2 = connection.transmit(apdu)
-        except CardConnectionException:
-            log.error("Card connection lost during write at page %d", page)
+        # NTAG WRITE: 0xA2 <page> <b0> <b1> <b2> <b3>
+        resp = _ntag_transceive(connection, [0xA2, page] + chunk)
+        if resp is None:
+            log.error("Write failed at page %d", page)
             return False
-        if sw1 != 0x90 or sw2 != 0x00:
-            log.error("Write failed at page %d: SW=%02X%02X", page, sw1, sw2)
-            return False
+        log.debug("Wrote page %d OK", page)
         page += 1
 
     return True
