@@ -14,3 +14,8 @@ DEBOUNCE_SECONDS = 3
 
 # NFC polling interval in seconds
 POLL_INTERVAL = 0.5
+
+# MIFARE Classic authentication key (6 bytes as hex string).
+# Most cards ship with the default key "FFFFFFFFFFFF".
+# If your cards use a different key, change this value.
+MIFARE_KEY = "FFFFFFFFFFFF"

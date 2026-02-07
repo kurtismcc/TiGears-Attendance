@@ -77,8 +77,8 @@ TAG_TYPES = {
     0x03: "MIFARE DESFire",
 }
 
-# MIFARE Classic default key A
-MIFARE_DEFAULT_KEY = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+# MIFARE Classic authentication key (from config, parsed from hex string)
+MIFARE_KEY = [int(config.MIFARE_KEY[i:i+2], 16) for i in range(0, 12, 2)]
 
 # MIFARE Classic 1K data blocks (skip block 0 = manufacturer, skip sector trailers 3,7,11...)
 # Sector 1: blocks 4,5,6 (trailer=7)  Sector 2: blocks 8,9,10 (trailer=11)
@@ -136,11 +136,13 @@ def _reset_rf_field(connection):
     commands to a MIFARE Classic card, or vice versa).
     """
     try:
-        # PN532 RFConfiguration: disable RF field
+        # PN532 RFConfiguration: disable RF field (auto RFCA off, RF off)
         connection.transmit([0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x00])
         time.sleep(0.1)
-        # PN532 RFConfiguration: enable RF field
-        connection.transmit([0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x01])
+        # PN532 RFConfiguration: enable RF field (auto RFCA on, RF always on)
+        # Value 0x03 = bit0 (auto RFCA) + bit1 (RF on). Using 0x01 would let
+        # the PN532 drop RF between APDUs, breaking MIFARE Classic auth state.
+        connection.transmit([0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x03])
     except Exception:
         pass
 
@@ -246,11 +248,13 @@ def write_tag_data(connection, payload: str) -> bool:
 # MIFARE Classic communication
 # ---------------------------------------------------------------------------
 
-def _mifare_load_key(connection, key_bytes=MIFARE_DEFAULT_KEY, key_slot=0x00):
+def _mifare_load_key(connection, key_bytes=None, key_slot=0x00):
     """
     Load an authentication key into the ACR122U key store.
     APDU: FF 82 00 <key_slot> 06 <6-byte key>
     """
+    if key_bytes is None:
+        key_bytes = MIFARE_KEY
     apdu = [0xFF, 0x82, 0x00, key_slot, 0x06] + list(key_bytes)
     try:
         data, sw1, sw2 = connection.transmit(apdu)
@@ -263,23 +267,27 @@ def _mifare_load_key(connection, key_bytes=MIFARE_DEFAULT_KEY, key_slot=0x00):
     return True
 
 
-def _mifare_auth_block(connection, block, key_type=0x60, key_slot=0x00):
+def _mifare_auth_block(connection, block, key_slot=0x00):
     """
-    Authenticate a MIFARE Classic block using a loaded key.
+    Authenticate a MIFARE Classic block using the loaded key.
+    Tries Key A (0x60) first, then Key B (0x61) as fallback.
     APDU: FF 86 00 00 05 01 00 <block> <key_type> <key_slot>
-    key_type: 0x60 = Key A, 0x61 = Key B
     """
-    apdu = [0xFF, 0x86, 0x00, 0x00, 0x05,
-            0x01, 0x00, block, key_type, key_slot]
-    try:
-        data, sw1, sw2 = connection.transmit(apdu)
-    except CardConnectionException as e:
-        log.error("Auth block %d transmit error: %s", block, e)
-        return False
-    if sw1 != 0x90 or sw2 != 0x00:
-        log.error("Auth block %d failed: SW=%02X%02X", block, sw1, sw2)
-        return False
-    return True
+    for key_type, key_name in [(0x60, "A"), (0x61, "B")]:
+        apdu = [0xFF, 0x86, 0x00, 0x00, 0x05,
+                0x01, 0x00, block, key_type, key_slot]
+        try:
+            data, sw1, sw2 = connection.transmit(apdu)
+        except CardConnectionException as e:
+            log.error("Auth block %d (Key %s) transmit error: %s", block, key_name, e)
+            continue
+        if sw1 == 0x90 and sw2 == 0x00:
+            if key_name == "B":
+                log.info("Auth block %d succeeded with Key B", block)
+            return True
+        log.debug("Auth block %d Key %s failed: SW=%02X%02X", block, key_name, sw1, sw2)
+    log.error("Auth block %d failed with both Key A and Key B", block)
+    return False
 
 
 def _mifare_read_block(connection, block):
