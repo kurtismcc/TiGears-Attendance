@@ -82,6 +82,22 @@ def get_reader():
     return None
 
 
+def _get_tag_type_byte(atr):
+    """
+    Extract the tag type byte from a PC/SC contactless ATR.
+    Searches for the PC/SC RID (A0 00 00 03 06), then reads
+    the card type byte 2 positions after: <standard> <name_hi> <name_lo>.
+    Returns the name_lo byte, or None if not found.
+    """
+    rid = [0xA0, 0x00, 0x00, 0x03, 0x06]
+    for i in range(len(atr) - len(rid)):
+        if atr[i:i + len(rid)] == rid:
+            type_idx = i + len(rid) + 2  # skip standard + name_hi
+            if type_idx < len(atr):
+                return atr[type_idx]
+    return None
+
+
 def connect_to_card(reader):
     """Try to connect to a card on the reader. Returns connection or None."""
     try:
@@ -89,11 +105,10 @@ def connect_to_card(reader):
         connection.connect()
         atr = connection.getATR()
         atr_str = toHexString(atr)
-        tag_type = "unknown"
-        if len(atr) > 13:
-            tag_type = TAG_TYPES.get(atr[13], f"unknown (0x{atr[13]:02X})")
+        type_byte = _get_tag_type_byte(atr)
+        tag_type = TAG_TYPES.get(type_byte, f"unknown (0x{type_byte:02X})" if type_byte is not None else "unknown")
         log.info("Card detected — ATR: %s — Type: %s", atr_str, tag_type)
-        if len(atr) > 13 and atr[13] != 0x44:
+        if type_byte is not None and type_byte != 0x44:
             log.warning(
                 "This tag is %s, not NTAG/Ultralight. "
                 "Only NTAG213/215/216 tags are supported.", tag_type
