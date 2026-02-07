@@ -14,6 +14,14 @@ const studentIdInput = document.getElementById('studentIdInput');
 const clearBtn = document.getElementById('clearBtn');
 const keypadButtons = document.querySelectorAll('.keypad-btn');
 const studentRoster = document.querySelector('.student-roster');
+const writeTagBtn = document.getElementById('writeTagBtn');
+const nfcWaiting = document.getElementById('nfcWaiting');
+const nfcStatus = document.getElementById('nfcStatus');
+
+// NFC WebSocket state
+let nfcSocket = null;
+let nfcConnected = false;
+let isWriteMode = false;
 
 // Add click event to all student buttons
 studentButtons.forEach(button => {
@@ -37,6 +45,7 @@ studentButtons.forEach(button => {
         studentIdInput.value = '';
         keypadContainer.style.display = 'block';
         studentRoster.style.display = 'none';
+        writeTagBtn.style.display = 'none';
 
         // Update confirm button text based on status
         if (selectedStudentStatus === 'in') {
@@ -67,6 +76,7 @@ keypadButtons.forEach(button => {
         }
 
         studentIdInput.value = enteredStudentId;
+        updateWriteTagButton();
     });
 });
 
@@ -74,6 +84,8 @@ keypadButtons.forEach(button => {
 clearBtn.addEventListener('click', function() {
     enteredStudentId = '';
     studentIdInput.value = '';
+    writeTagBtn.style.display = 'none';
+    cancelWriteMode();
 });
 
 // Confirm button
@@ -96,7 +108,25 @@ confirmBtn.addEventListener('click', function() {
 
 // Cancel button
 cancelBtn.addEventListener('click', function() {
+    cancelWriteMode();
     clearSelection();
+});
+
+// Write to Tag button
+writeTagBtn.addEventListener('click', function() {
+    if (!nfcConnected || !selectedStudentId) return;
+    if (enteredStudentId !== selectedStudentId) {
+        showMessage('Enter correct ID first', 'error');
+        return;
+    }
+
+    isWriteMode = true;
+    nfcWaiting.style.display = 'block';
+    writeTagBtn.style.display = 'none';
+    nfcSocket.send(JSON.stringify({
+        type: 'write_tag',
+        student_id: selectedStudentId
+    }));
 });
 
 // Function to record attendance
@@ -161,7 +191,29 @@ function clearSelection() {
     studentIdInput.value = '';
     keypadContainer.style.display = 'none';
     studentRoster.style.display = 'block';
+    writeTagBtn.style.display = 'none';
+    nfcWaiting.style.display = 'none';
     hideMessage();
+}
+
+// Show "Write to Tag" button when entered ID matches selected student and NFC is connected
+function updateWriteTagButton() {
+    if (nfcConnected && selectedStudentId && enteredStudentId === selectedStudentId && !isWriteMode) {
+        writeTagBtn.style.display = '';
+    } else {
+        writeTagBtn.style.display = 'none';
+    }
+}
+
+// Cancel any pending write mode
+function cancelWriteMode() {
+    if (isWriteMode) {
+        isWriteMode = false;
+        nfcWaiting.style.display = 'none';
+        if (nfcSocket && nfcSocket.readyState === WebSocket.OPEN) {
+            nfcSocket.send(JSON.stringify({ type: 'cancel_write' }));
+        }
+    }
 }
 
 // Prevent double-tap zoom on buttons
@@ -199,3 +251,104 @@ function fetchStudentStandings(studentId) {
             console.error('Error fetching standings:', error);
         });
 }
+
+// ---------------------------------------------------------------------------
+// NFC WebSocket Client
+// ---------------------------------------------------------------------------
+
+function connectNfc() {
+    nfcSocket = new WebSocket('ws://localhost:8765');
+
+    nfcSocket.onopen = function() {
+        console.log('NFC bridge connected');
+    };
+
+    nfcSocket.onclose = function() {
+        nfcConnected = false;
+        updateNfcIndicator(false);
+        writeTagBtn.style.display = 'none';
+        // Auto-reconnect after 3 seconds
+        setTimeout(connectNfc, 3000);
+    };
+
+    nfcSocket.onerror = function() {
+        // onclose will fire after this, which handles reconnect
+    };
+
+    nfcSocket.onmessage = function(event) {
+        let msg;
+        try {
+            msg = JSON.parse(event.data);
+        } catch (e) {
+            return;
+        }
+
+        switch (msg.type) {
+            case 'reader_status':
+                nfcConnected = msg.connected;
+                updateNfcIndicator(msg.connected);
+                break;
+
+            case 'tag_scan':
+                handleTagScan(msg.student_id);
+                break;
+
+            case 'write_complete':
+                handleWriteComplete(msg.success, msg.student_id);
+                break;
+
+            case 'error':
+                showMessage(msg.message, 'error');
+                break;
+        }
+    };
+}
+
+function updateNfcIndicator(connected) {
+    if (connected) {
+        nfcStatus.className = 'nfc-status connected';
+        nfcStatus.title = 'NFC Reader Connected';
+    } else {
+        nfcStatus.className = 'nfc-status disconnected';
+        nfcStatus.title = 'NFC Reader Disconnected';
+    }
+}
+
+function handleTagScan(studentId) {
+    // Find the roster button for this student
+    const button = document.querySelector(`.roster-item[data-student-id="${studentId}"]`);
+    if (!button) {
+        showMessage('Unknown tag', 'error');
+        return;
+    }
+
+    // Determine current status and toggle
+    const currentStatus = button.getAttribute('data-status');
+    const action = (currentStatus === 'in') ? 'out' : 'in';
+    const studentName = button.querySelector('.roster-name').textContent;
+
+    // Briefly highlight the student in the roster
+    button.classList.add('selected');
+    setTimeout(() => button.classList.remove('selected'), 2000);
+
+    // Auto sign-in/out
+    recordAttendance(studentId, action);
+}
+
+function handleWriteComplete(success, studentId) {
+    isWriteMode = false;
+    nfcWaiting.style.display = 'none';
+
+    if (success) {
+        showMessage('Tag written successfully!', 'success');
+        setTimeout(() => {
+            clearSelection();
+        }, 2000);
+    } else {
+        showMessage('Failed to write tag. Try again.', 'error');
+        updateWriteTagButton();
+    }
+}
+
+// Start NFC connection on page load
+connectNfc();

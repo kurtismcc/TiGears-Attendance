@@ -6,6 +6,7 @@ A touch-friendly attendance tracking system for robotics teams, built with PHP a
 
 - **Touch-optimized interface** for kiosk/tablet use with large buttons and numeric keypad
 - **Student ID verification** - students enter their ID to confirm identity before signing in/out
+- **NFC tag support** (optional) - students tap an NFC tag on an ACR122U reader for instant sign-in/out, with HMAC-signed payloads to prevent cloning
 - **Configurable attendance windows** - define meeting days and times (e.g., Tue/Thu 2-4pm, Sat 9am-1pm)
 - **Automatic award tracking** with three leaderboards:
   - **Consecutive Meetings** - longest streak of attended windows
@@ -57,12 +58,18 @@ See [docs/Setup.md](docs/Setup.md) for detailed installation instructions.
 │   ├── admin_student.php    # Edit student attendance records
 │   ├── awards.php           # Award calculation functions
 │   ├── window_transform.php # Window-based data transformation
-│   ├── script.js            # Frontend JavaScript
+│   ├── script.js            # Frontend JavaScript (+ NFC WebSocket client)
 │   ├── style.css            # Touch-optimized styling
 │   └── assets/              # Logo and background images
 │
+├── nfc_bridge/              # Optional: ACR122U NFC reader support
+│   ├── nfc_bridge.py        # Python bridge service (WebSocket + PC/SC)
+│   ├── config.py            # HMAC secret and WebSocket settings
+│   ├── requirements.txt     # Python dependencies (pyscard, websockets)
+│   └── start_bridge.bat     # Launcher script for Windows
+│
 └── docs/
-    ├── Setup.md             # Installation guide
+    ├── Setup.md             # Installation guide (includes NFC setup)
     └── AddAwards.md         # Guide to adding new awards
 ```
 
@@ -76,11 +83,21 @@ See [docs/Setup.md](docs/Setup.md) for detailed installation instructions.
 
 ## Usage
 
-### For Students
-1. Find your name in the Signed Out or Never Signed In list
+### For Students (Keypad)
+1. Find your name in the roster
 2. Tap your name
 3. Enter your student ID on the keypad
 4. Tap Confirm to sign in/out
+
+### For Students (NFC Tag)
+1. Tap your NFC tag on the ACR122U reader
+2. You're signed in/out automatically — no keypad needed
+
+### Writing NFC Tags
+1. Tap your name in the roster
+2. Enter your student ID on the keypad
+3. Tap **"Write to Tag"** (appears when ID is correct and NFC reader is connected)
+4. Hold a blank NFC tag against the reader
 
 ### For Admins
 - Click the right logo to access the admin page

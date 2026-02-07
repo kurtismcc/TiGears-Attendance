@@ -390,12 +390,169 @@ Method 2: Using SQL
 
 ---
 
+## Step 9: Set Up NFC Reader (Optional)
+
+If you have an ACR122U USB NFC reader, you can let students tap NFC tags to sign in/out instantly instead of typing their ID on the keypad.
+
+### Install Python
+
+The NFC bridge service requires Python 3.10 or newer.
+
+1. Go to: https://www.python.org/downloads/
+2. Download the latest **Python 3.x** installer for Windows
+3. **Important:** On the first installer screen, check **"Add python.exe to PATH"**
+4. Click **"Install Now"**
+5. After installation, verify by opening Command Prompt and running:
+   ```cmd
+   python --version
+   ```
+   You should see something like `Python 3.12.x`
+
+### Install Python Dependencies
+
+1. Open **Command Prompt**
+2. Navigate to the project:
+   ```cmd
+   cd d:\VHSTigears\Attendance\nfc_bridge
+   ```
+3. Install the required packages:
+   ```cmd
+   pip install -r requirements.txt
+   ```
+   This installs `pyscard` (smart card communication) and `websockets` (WebSocket server).
+
+**If `pyscard` fails to install**, you may need the Microsoft Visual C++ Build Tools:
+1. Go to: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+2. Download and install **Build Tools for Visual Studio**
+3. In the installer, select **"Desktop development with C++"**
+4. After installation, try `pip install pyscard` again
+
+### Configure the NFC Bridge
+
+1. Open `d:\VHSTigears\Attendance\nfc_bridge\config.py` in a text editor
+2. **Change the HMAC secret** to a random string of your choice:
+   ```python
+   HMAC_SECRET = "your-unique-random-secret-here"
+   ```
+   This secret signs the data written to NFC tags. Pick something long and random.
+   **Warning:** If you change the secret later, all previously written tags will stop working.
+3. The other settings can be left at their defaults
+
+### Test the NFC Bridge
+
+1. Plug in the ACR122U reader via USB
+2. Open **Command Prompt** and run:
+   ```cmd
+   cd d:\VHSTigears\Attendance\nfc_bridge
+   python nfc_bridge.py
+   ```
+3. You should see:
+   ```
+   Starting NFC Bridge on ws://localhost:8765
+   NFC reader connected
+   ```
+4. Open the attendance page in your browser — the small dot in the top-right of the header should turn **green**
+5. Press **Ctrl+C** in the Command Prompt to stop the bridge
+
+### Writing NFC Tags
+
+Once the bridge is running:
+
+1. Tap a student's name on the attendance page
+2. Enter their student ID on the keypad
+3. A **"Write to Tag"** button appears next to Confirm
+4. Click **"Write to Tag"**
+5. Hold a blank NFC tag (NTAG213/215/216) against the ACR122U reader
+6. You'll see a success message when the tag is written
+
+After writing, students can simply tap their tag on the reader to sign in/out — no keypad needed.
+
+### Auto-Start the NFC Bridge with XAMPP
+
+To have the NFC bridge start automatically when XAMPP starts:
+
+#### Method A: Add to Windows Startup (Simplest)
+
+1. Press **Windows + R**, type `shell:startup`, press **Enter**
+2. Copy `d:\VHSTigears\Attendance\nfc_bridge\start_bridge.bat` into this folder
+3. The bridge will now start automatically when Windows boots (alongside XAMPP if you followed Step 2)
+
+#### Method B: Modify the XAMPP Start Script
+
+1. Open **Notepad as Administrator** (right-click Notepad → Run as administrator)
+2. Open the file `C:\xampp\xampp_start.exe` — if that doesn't work, try `C:\xampp\xampp_control.exe`'s config
+3. Instead, create a combined start script. Create a file `C:\xampp\start_all.bat`:
+   ```batch
+   @echo off
+   echo Starting XAMPP services and NFC Bridge...
+
+   REM Start Apache and MySQL via XAMPP
+   start "" "C:\xampp\xampp_start.exe"
+
+   REM Start NFC Bridge (in a minimized window)
+   start /min "" "d:\VHSTigears\Attendance\nfc_bridge\start_bridge.bat"
+
+   echo All services started.
+   ```
+4. Replace the startup shortcut or scheduled task to use `C:\xampp\start_all.bat` instead of `xampp_start.exe`
+
+#### Method C: Install as a Windows Service (Advanced)
+
+Using NSSM (Non-Sucking Service Manager):
+
+1. Download NSSM from: https://nssm.cc/download
+2. Extract and open Command Prompt as Administrator
+3. Run:
+   ```cmd
+   nssm install NFCBridge
+   ```
+4. In the dialog that appears:
+   - **Path**: `C:\Python312\python.exe` (adjust to your Python path — run `where python` to find it)
+   - **Startup directory**: `d:\VHSTigears\Attendance\nfc_bridge`
+   - **Arguments**: `nfc_bridge.py`
+5. Click **"Install service"**
+6. Start the service:
+   ```cmd
+   nssm start NFCBridge
+   ```
+7. The bridge will now auto-start with Windows and restart if it crashes
+
+### NFC Troubleshooting
+
+#### Green dot doesn't appear in header
+- The NFC bridge is not running. Start it with `start_bridge.bat`
+- Check the Command Prompt window for error messages
+
+#### "NFC reader not found" in the bridge console
+- Make sure the ACR122U is plugged in via USB
+- Check Device Manager → Smart card readers — the ACR122U should appear
+- Try unplugging and replugging the reader
+- Install the ACR122U driver from: https://www.acs.com.hk/en/driver/3/acr122u-usb-nfc-reader/
+
+#### Tags not reading / "Invalid or unsigned tag"
+- The tag may have been written with a different HMAC secret
+- The tag may be blank — it needs to be written first using the "Write to Tag" flow
+- Try a different NFC tag — NTAG213, 215, or 216 are supported
+
+#### "Failed to write tag"
+- Make sure the tag is held flat against the reader and not moving
+- The tag may be write-protected or damaged — try a different tag
+- NTAG213 supports payloads up to ~144 bytes, which is sufficient for student IDs
+
+#### `pyscard` import error
+- Ensure the **PC/SC Smart Card Service** is running:
+  1. Press **Windows + R**, type `services.msc`, press **Enter**
+  2. Find **"Smart Card"** service
+  3. Right-click → **Start** (and set Startup type to **Automatic**)
+
+---
+
 ## Next Steps
 
 - Test the system with a few students
 - Add all team members to the database
 - Set up the touchscreen kiosk in your lab/workshop
-- Consider adding features like attendance reports (future development)
+- (Optional) Set up NFC tags for faster sign-in/out
 
 ## Support
 

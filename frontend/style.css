@@ -421,6 +421,45 @@ h1 {
     color: white;
 }
 
+.write-tag {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+/* NFC status indicator */
+.nfc-status {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background-color 0.3s ease;
+}
+
+.nfc-status.connected {
+    background-color: #4CAF50;
+    box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+}
+
+.nfc-status.disconnected {
+    background-color: #f44336;
+    box-shadow: 0 0 6px rgba(244, 67, 54, 0.5);
+}
+
+/* NFC waiting message */
+.nfc-waiting {
+    text-align: center;
+    padding: 15px;
+    color: #667eea;
+    font-weight: bold;
+    font-size: 1.1em;
+    animation: nfc-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes nfc-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* Student Roster - Unified two-column layout */
 .student-roster {
     background: white;

@@ -72,6 +72,18 @@ if errorlevel 1 (
 )
 echo    - backend files copied successfully
 
+REM Copy nfc_bridge directory
+echo [3/3] Copying NFC bridge files...
+if exist "%DEST_PATH%\nfc_bridge" (
+    rmdir /s /q "%DEST_PATH%\nfc_bridge"
+)
+xcopy "%PROJECT_ROOT%\nfc_bridge" "%DEST_PATH%\nfc_bridge\" /E /I /Y /Q
+if errorlevel 1 (
+    echo ERROR: Failed to copy NFC bridge files
+    exit /b 1
+)
+echo    - NFC bridge files copied successfully
+
 echo.
 echo ========================================
 echo Deployment completed successfully!
@@ -82,6 +94,7 @@ echo 1. Verify database configuration in: %DEST_PATH%\backend\config.php
 echo 2. Ensure MySQL database is set up (run backend\schema.sql if needed)
 echo 3. Access the application at: http://localhost/attendance/frontend/
 echo    (adjust URL based on your web server configuration)
+echo 4. (Optional) Set up NFC bridge: pip install -r %DEST_PATH%\nfc_bridge\requirements.txt
 echo.
 
 endlocal

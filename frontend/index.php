@@ -82,6 +82,7 @@ if ($result->num_rows > 0) {
             <img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo">
             <h1>TiGears - Attendance Tracker</h1>
             <a href="admin.php"><img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo"></a>
+            <span class="nfc-status disconnected" id="nfcStatus" title="NFC Reader Disconnected"></span>
         </div>
         <p class="instructions">Tap your name and then tap Sign In or Sign Out</p>
 
@@ -144,7 +145,11 @@ if ($result->num_rows > 0) {
             </div>
             <div class="action-buttons">
                 <button class="action-button confirm" id="confirmBtn">Confirm</button>
+                <button class="action-button write-tag" id="writeTagBtn" style="display: none;">Write to Tag</button>
                 <button class="action-button cancel" id="cancelBtn">Cancel</button>
+            </div>
+            <div class="nfc-waiting" id="nfcWaiting" style="display: none;">
+                Hold tag to reader...
             </div>
         </div>
 
