@@ -256,6 +256,7 @@ def _mifare_load_key(connection, key_bytes=None, key_slot=0x00):
     if key_bytes is None:
         key_bytes = MIFARE_KEY
     apdu = [0xFF, 0x82, 0x00, key_slot, 0x06] + list(key_bytes)
+    log.debug("Load Key APDU: %s", " ".join(f"{b:02X}" for b in apdu))
     try:
         data, sw1, sw2 = connection.transmit(apdu)
     except CardConnectionException as e:
@@ -264,29 +265,36 @@ def _mifare_load_key(connection, key_bytes=None, key_slot=0x00):
     if sw1 != 0x90 or sw2 != 0x00:
         log.error("Load key failed: SW=%02X%02X", sw1, sw2)
         return False
+    log.debug("Load key OK (slot %d)", key_slot)
     return True
 
 
-def _mifare_auth_block(connection, block, key_slot=0x00):
+def _mifare_auth_block(connection, block, key_type=0x60, key_slot=0x00):
     """
     Authenticate a MIFARE Classic block using the loaded key.
-    Tries Key A (0x60) first, then Key B (0x61) as fallback.
     APDU: FF 86 00 00 05 01 00 <block> <key_type> <key_slot>
+
+    key_type: 0x60 = Key A, 0x61 = Key B.
+
+    NOTE: Only ONE key type should be tried per card activation.  After a
+    failed MIFARE Classic auth the card enters the HALTED state per
+    ISO 14443-3 and will not respond to further commands until it goes
+    through a new WUPA + anticollision + select cycle (i.e. a reconnect).
     """
-    for key_type, key_name in [(0x60, "A"), (0x61, "B")]:
-        apdu = [0xFF, 0x86, 0x00, 0x00, 0x05,
-                0x01, 0x00, block, key_type, key_slot]
-        try:
-            data, sw1, sw2 = connection.transmit(apdu)
-        except CardConnectionException as e:
-            log.error("Auth block %d (Key %s) transmit error: %s", block, key_name, e)
-            continue
-        if sw1 == 0x90 and sw2 == 0x00:
-            if key_name == "B":
-                log.info("Auth block %d succeeded with Key B", block)
-            return True
-        log.debug("Auth block %d Key %s failed: SW=%02X%02X", block, key_name, sw1, sw2)
-    log.error("Auth block %d failed with both Key A and Key B", block)
+    key_name = "A" if key_type == 0x60 else "B"
+    apdu = [0xFF, 0x86, 0x00, 0x00, 0x05,
+            0x01, 0x00, block, key_type, key_slot]
+    log.debug("Auth block %d Key %s APDU: %s", block, key_name,
+              " ".join(f"{b:02X}" for b in apdu))
+    try:
+        data, sw1, sw2 = connection.transmit(apdu)
+    except CardConnectionException as e:
+        log.error("Auth block %d Key %s transmit error: %s", block, key_name, e)
+        return False
+    if sw1 == 0x90 and sw2 == 0x00:
+        log.debug("Auth block %d Key %s OK", block, key_name)
+        return True
+    log.error("Auth block %d Key %s failed: SW=%02X%02X", block, key_name, sw1, sw2)
     return False
 
 
@@ -334,14 +342,14 @@ def _sector_of_block(block):
     return block // 4
 
 
-def read_tag_data_mifare(connection) -> str | None:
+def _read_mifare_with_key_type(connection, key_type=0x60):
     """
-    Read user data from a MIFARE Classic tag.
-    Reads data blocks across sectors 1-2 (blocks 4,5,6,8,9,10).
-    Each block is 16 bytes, giving 96 bytes total.
+    Attempt to read MIFARE Classic data blocks using the given key type.
+    Returns raw byte list on success, None on failure.
     """
+    key_name = "A" if key_type == 0x60 else "B"
     if not _mifare_load_key(connection):
-        log.error("Failed to load MIFARE key")
+        log.error("Failed to load MIFARE key for Key %s attempt", key_name)
         return None
 
     raw_bytes = []
@@ -350,8 +358,9 @@ def read_tag_data_mifare(connection) -> str | None:
     for block in MIFARE_DATA_BLOCKS:
         sector = _sector_of_block(block)
         if sector != last_sector:
-            if not _mifare_auth_block(connection, block):
-                log.error("Failed to authenticate sector %d (block %d)", sector, block)
+            if not _mifare_auth_block(connection, block, key_type=key_type):
+                log.error("Key %s auth failed for sector %d (block %d)",
+                          key_name, sector, block)
                 return None
             last_sector = sector
 
@@ -360,6 +369,36 @@ def read_tag_data_mifare(connection) -> str | None:
             log.error("Failed to read block %d", block)
             return None
         raw_bytes.extend(data)
+
+    return raw_bytes
+
+
+def read_tag_data_mifare(connection, reader=None) -> str | None:
+    """
+    Read user data from a MIFARE Classic tag.
+    Reads data blocks across sectors 1-2 (blocks 4,5,6,8,9,10).
+    Each block is 16 bytes, giving 96 bytes total.
+
+    Tries Key A first.  If that fails and a reader handle is provided,
+    reconnects to escape the HALTED state and retries with Key B.
+    """
+    # --- Try Key A ---
+    raw_bytes = _read_mifare_with_key_type(connection, key_type=0x60)
+
+    # --- Key A failed: try Key B after reconnecting ---
+    if raw_bytes is None and reader is not None:
+        log.info("Key A failed — reconnecting card to try Key B")
+        try:
+            connection.disconnect()
+        except Exception:
+            pass
+        try:
+            connection = reader.createConnection()
+            connection.connect()
+        except Exception as e:
+            log.error("Reconnect for Key B failed: %s", e)
+            return None
+        raw_bytes = _read_mifare_with_key_type(connection, key_type=0x61)
 
     if not raw_bytes:
         return None
@@ -380,11 +419,51 @@ def read_tag_data_mifare(connection) -> str | None:
         return None
 
 
-def write_tag_data_mifare(connection, payload: str) -> bool:
+def _write_mifare_with_key_type(connection, data, key_type=0x60):
+    """
+    Attempt to write data blocks to MIFARE Classic using the given key type.
+    data must already be padded to a multiple of 16 bytes.
+    Returns True on success, False on failure.
+    """
+    key_name = "A" if key_type == 0x60 else "B"
+    if not _mifare_load_key(connection):
+        log.error("Failed to load MIFARE key for Key %s attempt", key_name)
+        return False
+
+    last_sector = -1
+    block_idx = 0
+
+    for i in range(0, len(data), 16):
+        if block_idx >= len(MIFARE_DATA_BLOCKS):
+            break
+        block = MIFARE_DATA_BLOCKS[block_idx]
+        sector = _sector_of_block(block)
+
+        if sector != last_sector:
+            if not _mifare_auth_block(connection, block, key_type=key_type):
+                log.error("Key %s auth failed for sector %d (block %d)",
+                          key_name, sector, block)
+                return False
+            last_sector = sector
+
+        chunk = data[i:i + 16]
+        if not _mifare_write_block(connection, block, chunk):
+            log.error("Write failed at block %d", block)
+            return False
+        log.debug("Wrote block %d OK", block)
+        block_idx += 1
+
+    return True
+
+
+def write_tag_data_mifare(connection, payload: str, reader=None) -> bool:
     """
     Write an ASCII string payload to a MIFARE Classic tag.
     Writes across data blocks in sectors 1-2 (blocks 4,5,6,8,9,10).
     Max payload: 95 bytes (96 bytes minus null terminator).
+
+    Tries Key A first.  If that fails and a reader handle is provided,
+    reconnects to escape the HALTED state and retries with Key B.
     """
     data = list(payload.encode("ascii")) + [0x00]
 
@@ -398,33 +477,26 @@ def write_tag_data_mifare(connection, payload: str) -> bool:
     while len(data) % 16 != 0:
         data.append(0x00)
 
-    if not _mifare_load_key(connection):
-        log.error("Failed to load MIFARE key")
-        return False
+    # --- Try Key A ---
+    if _write_mifare_with_key_type(connection, data, key_type=0x60):
+        return True
 
-    last_sector = -1
-    block_idx = 0
-
-    for i in range(0, len(data), 16):
-        if block_idx >= len(MIFARE_DATA_BLOCKS):
-            break
-        block = MIFARE_DATA_BLOCKS[block_idx]
-        sector = _sector_of_block(block)
-
-        if sector != last_sector:
-            if not _mifare_auth_block(connection, block):
-                log.error("Failed to authenticate sector %d (block %d)", sector, block)
-                return False
-            last_sector = sector
-
-        chunk = data[i:i + 16]
-        if not _mifare_write_block(connection, block, chunk):
-            log.error("Write failed at block %d", block)
+    # --- Key A failed: try Key B after reconnecting ---
+    if reader is not None:
+        log.info("Key A write failed — reconnecting card to try Key B")
+        try:
+            connection.disconnect()
+        except Exception:
+            pass
+        try:
+            connection = reader.createConnection()
+            connection.connect()
+        except Exception as e:
+            log.error("Reconnect for Key B failed: %s", e)
             return False
-        log.debug("Wrote block %d OK", block)
-        block_idx += 1
+        return _write_mifare_with_key_type(connection, data, key_type=0x61)
 
-    return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +607,15 @@ def poll_nfc_blocking():
     """
     Blocking function that runs one poll cycle.
     Returns a dict describing what happened, or None.
+
+    IMPORTANT: _reset_rf_field (PN532 escape APDUs) must NEVER be called
+    on a connection that is also used for MIFARE Classic PC/SC pseudo-APDUs
+    (FF 82 / FF 86 / FF B0 / FF D6).  Mixing the two communication modes
+    corrupts the ACR122U's internal PC/SC state and causes all subsequent
+    MIFARE operations to fail — even after disconnect/reconnect.
+
+    For MIFARE Classic, the normal disconnect() in the finally block is
+    sufficient to reset card state between poll cycles.
     """
     reader = get_reader()
     if reader is None:
@@ -551,6 +632,7 @@ def poll_nfc_blocking():
         # --- Unsupported tag type ---
         if not is_mifare and not is_ntag:
             tag_name = TAG_TYPES.get(type_byte, "unknown")
+            # OK to use _reset_rf_field here — no PC/SC pseudo-APDUs used
             _reset_rf_field(connection)
             return {"event": "unsupported_tag", "tag_type": tag_name}
 
@@ -559,11 +641,12 @@ def poll_nfc_blocking():
             student_id = state.write_pending
             payload = make_payload(student_id)
             if is_mifare:
-                success = write_tag_data_mifare(connection, payload)
+                success = write_tag_data_mifare(connection, payload, reader=reader)
             else:
                 success = write_tag_data(connection, payload)
             state.write_pending = None
-            if not success:
+            if not success and is_ntag:
+                # Only reset RF for NTAG — never for MIFARE Classic
                 _reset_rf_field(connection)
             return {
                 "event": "write_result",
@@ -573,13 +656,17 @@ def poll_nfc_blocking():
 
         # --- Read mode ---
         if is_mifare:
-            raw = read_tag_data_mifare(connection)
+            raw = read_tag_data_mifare(connection, reader=reader)
         else:
             raw = read_tag_data(connection)
 
         if raw is None:
-            _reset_rf_field(connection)
-            return {"event": "empty_tag"}
+            if is_ntag:
+                # Only reset RF for NTAG — never for MIFARE Classic
+                _reset_rf_field(connection)
+                return {"event": "empty_tag"}
+            else:
+                return {"event": "auth_failed"}
 
         student_id = verify_payload(raw)
         if student_id is None:
@@ -653,6 +740,11 @@ async def nfc_poll_loop():
             if not state.should_debounce_error("unsupported_tag"):
                 await broadcast({"type": "error", "message": f"Unsupported tag type: {result.get('tag_type', 'unknown')}"})
                 log.warning("Unsupported tag type: %s", result.get("tag_type", "unknown"))
+
+        elif event == "auth_failed":
+            if not state.should_debounce_error("auth_failed"):
+                await broadcast({"type": "error", "message": "Could not read tag (auth failed)"})
+                log.warning("MIFARE Classic authentication failed — check MIFARE_KEY in config.py")
 
         elif event == "empty_tag":
             if not state.should_debounce_error("empty_tag"):
