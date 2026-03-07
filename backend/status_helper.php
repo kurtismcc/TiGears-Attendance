@@ -17,16 +17,20 @@ function calculateAttendanceStatus($conn, $timestamp) {
     $time = $dt->format('H:i:s');
     $timeSeconds = strtotime($time);
 
-    // Find windows for that day where sign-in is before window end
+    // Find windows for that day where sign-in is before window end,
+    // and the window's date range covers the sign-in date
+    $date = $dt->format('Y-m-d');
     $stmt = $conn->prepare("
         SELECT start_time, end_time
         FROM attendance_windows
         WHERE day_of_week = ?
         AND end_time >= ?
+        AND valid_from <= ?
+        AND valid_to >= ?
         ORDER BY start_time ASC
         LIMIT 1
     ");
-    $stmt->bind_param("is", $dayOfWeek, $time);
+    $stmt->bind_param("isss", $dayOfWeek, $time, $date, $date);
     $stmt->execute();
     $result = $stmt->get_result();
 

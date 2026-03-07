@@ -22,12 +22,14 @@ CREATE TABLE IF NOT EXISTS attendance_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Attendance windows table
--- Defines when attendance is expected (day of week + time range)
+-- Defines when attendance is expected (day of week + time range + date range)
 CREATE TABLE IF NOT EXISTS attendance_windows (
     id INT AUTO_INCREMENT PRIMARY KEY,
     day_of_week TINYINT NOT NULL,  -- 0=Sunday, 1=Monday, ..., 6=Saturday
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
+    valid_from DATE NOT NULL DEFAULT '2000-01-01',  -- First date this window applies
+    valid_to   DATE NOT NULL DEFAULT '2040-01-01',  -- Last date this window applies (inclusive)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_day (day_of_week),
     CONSTRAINT chk_day CHECK (day_of_week BETWEEN 0 AND 6),

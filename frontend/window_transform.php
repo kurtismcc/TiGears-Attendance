@@ -32,16 +32,6 @@ function generateWindowOccurrences($windows, $startDate, $endDate) {
     $occurrences = [];
     $id = 1;
 
-    // Build lookup of windows by day of week
-    $windowsByDay = [];
-    foreach ($windows as $window) {
-        $dow = (int)$window['day_of_week'];
-        if (!isset($windowsByDay[$dow])) {
-            $windowsByDay[$dow] = [];
-        }
-        $windowsByDay[$dow][] = $window;
-    }
-
     // Iterate through each day from start to end
     $current = new DateTime($startDate);
     $end = new DateTime($endDate);
@@ -50,19 +40,27 @@ function generateWindowOccurrences($windows, $startDate, $endDate) {
         $dayOfWeek = (int)$current->format('w');
         $dateStr = $current->format('Y-m-d');
 
-        // Check if there are windows for this day
-        if (isset($windowsByDay[$dayOfWeek])) {
-            foreach ($windowsByDay[$dayOfWeek] as $window) {
-                $occurrences[] = [
-                    'id' => $id++,
-                    'date' => $dateStr,
-                    'day_of_week' => $dayOfWeek,
-                    'start_time' => $window['start_time'],
-                    'end_time' => $window['end_time'],
-                    'start_datetime' => $dateStr . ' ' . $window['start_time'],
-                    'end_datetime' => $dateStr . ' ' . $window['end_time']
-                ];
+        // Find all windows that apply to this day of week AND this calendar date
+        foreach ($windows as $window) {
+            if ((int)$window['day_of_week'] !== $dayOfWeek) {
+                continue;
             }
+            // Check date range validity
+            if (isset($window['valid_from']) && $dateStr < $window['valid_from']) {
+                continue;
+            }
+            if (isset($window['valid_to']) && $dateStr > $window['valid_to']) {
+                continue;
+            }
+            $occurrences[] = [
+                'id' => $id++,
+                'date' => $dateStr,
+                'day_of_week' => $dayOfWeek,
+                'start_time' => $window['start_time'],
+                'end_time' => $window['end_time'],
+                'start_datetime' => $dateStr . ' ' . $window['start_time'],
+                'end_datetime' => $dateStr . ' ' . $window['end_time']
+            ];
         }
 
         $current->modify('+1 day');
@@ -316,7 +314,7 @@ function loadTransformedData($conn) {
 
     // Load attendance windows configuration
     $windows = [];
-    $result = $conn->query("SELECT day_of_week, start_time, end_time FROM attendance_windows");
+    $result = $conn->query("SELECT day_of_week, start_time, end_time, valid_from, valid_to FROM attendance_windows");
     if ($result && $result->num_rows > 0) {
         while ($row = $result->fetch_assoc()) {
             $windows[] = $row;

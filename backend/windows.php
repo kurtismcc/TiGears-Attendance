@@ -8,7 +8,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 switch ($method) {
     case 'GET':
         // List all attendance windows
-        $result = $conn->query("SELECT id, day_of_week, start_time, end_time FROM attendance_windows ORDER BY day_of_week, start_time");
+        $result = $conn->query("SELECT id, day_of_week, start_time, end_time, valid_from, valid_to FROM attendance_windows ORDER BY valid_from, day_of_week, start_time");
         $windows = [];
         while ($row = $result->fetch_assoc()) {
             $windows[] = $row;
@@ -28,6 +28,8 @@ switch ($method) {
         $day = intval($data['day_of_week']);
         $start = $data['start_time'];
         $end = $data['end_time'];
+        $validFrom = isset($data['valid_from']) ? $data['valid_from'] : '2000-01-01';
+        $validTo   = isset($data['valid_to'])   ? $data['valid_to']   : '2040-01-01';
 
         // Validate day of week
         if ($day < 0 || $day > 6) {
@@ -41,8 +43,14 @@ switch ($method) {
             exit;
         }
 
-        $stmt = $conn->prepare("INSERT INTO attendance_windows (day_of_week, start_time, end_time) VALUES (?, ?, ?)");
-        $stmt->bind_param("iss", $day, $start, $end);
+        // Validate dates
+        if ($validFrom > $validTo) {
+            echo json_encode(['success' => false, 'message' => 'Valid from date must be before valid to date']);
+            exit;
+        }
+
+        $stmt = $conn->prepare("INSERT INTO attendance_windows (day_of_week, start_time, end_time, valid_from, valid_to) VALUES (?, ?, ?, ?, ?)");
+        $stmt->bind_param("issss", $day, $start, $end, $validFrom, $validTo);
 
         if ($stmt->execute()) {
             echo json_encode(['success' => true, 'message' => 'Window created', 'id' => $conn->insert_id]);

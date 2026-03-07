@@ -2,7 +2,7 @@
 require_once '../backend/db.php';
 
 // Get all attendance windows
-$result = $conn->query("SELECT id, day_of_week, start_time, end_time FROM attendance_windows ORDER BY day_of_week, start_time");
+$result = $conn->query("SELECT id, day_of_week, start_time, end_time, valid_from, valid_to FROM attendance_windows ORDER BY valid_from, day_of_week, start_time");
 $windows = [];
 while ($row = $result->fetch_assoc()) {
     $windows[] = $row;
@@ -234,6 +234,14 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
                             <input type="time" id="endTime" name="end_time" required>
                         </div>
                         <div class="form-group">
+                            <label for="validFrom">Valid From</label>
+                            <input type="date" id="validFrom" name="valid_from" value="2000-01-01" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="validTo">Valid To</label>
+                            <input type="date" id="validTo" name="valid_to" value="2040-01-01" required>
+                        </div>
+                        <div class="form-group">
                             <label>&nbsp;</label>
                             <button type="submit" class="btn btn-primary">Add Window</button>
                         </div>
@@ -259,6 +267,9 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
                                         echo ' - ';
                                         echo date('g:i A', strtotime($window['end_time']));
                                         ?>
+                                    </span>
+                                    <span class="window-dates" style="color:#888; font-size:0.85em;">
+                                        <?php echo $window['valid_from']; ?> &ndash; <?php echo $window['valid_to']; ?>
                                     </span>
                                 </div>
                                 <button class="btn btn-danger delete-btn" data-id="<?php echo $window['id']; ?>">Delete</button>
@@ -296,9 +307,16 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
             const dayOfWeek = parseInt(document.getElementById('dayOfWeek').value);
             const startTime = document.getElementById('startTime').value;
             const endTime = document.getElementById('endTime').value;
+            const validFrom = document.getElementById('validFrom').value;
+            const validTo = document.getElementById('validTo').value;
 
             if (startTime >= endTime) {
                 showMessage('Start time must be before end time', 'error');
+                return;
+            }
+
+            if (validFrom > validTo) {
+                showMessage('Valid from date must be before valid to date', 'error');
                 return;
             }
 
@@ -309,7 +327,9 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
                     body: JSON.stringify({
                         day_of_week: dayOfWeek,
                         start_time: startTime,
-                        end_time: endTime
+                        end_time: endTime,
+                        valid_from: validFrom,
+                        valid_to: validTo
                     })
                 });
 
@@ -330,6 +350,7 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
                         <div class="window-info">
                             <span class="window-day">${dayNames[dayOfWeek]}</span>
                             <span class="window-time">${formatTime(startTime)} - ${formatTime(endTime)}</span>
+                            <span class="window-dates" style="color:#888; font-size:0.85em;">${validFrom} &ndash; ${validTo}</span>
                         </div>
                         <button class="btn btn-danger delete-btn" data-id="${data.id}">Delete</button>
                     `;

@@ -13,7 +13,7 @@ $todayDayOfWeek = date('w'); // 0 = Sunday, 6 = Saturday
 $now = time();
 
 // Get today's window (if any)
-$windowResult = $conn->query("SELECT start_time, end_time FROM attendance_windows WHERE day_of_week = $todayDayOfWeek LIMIT 1");
+$windowResult = $conn->query("SELECT start_time, end_time FROM attendance_windows WHERE day_of_week = $todayDayOfWeek AND valid_from <= '$today' AND valid_to >= '$today' LIMIT 1");
 $todayWindow = $windowResult->fetch_assoc();
 $isPastWindow = false;
 
