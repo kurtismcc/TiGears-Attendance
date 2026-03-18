@@ -1,7 +1,8 @@
-// Activate test competition mode if toggled (only on non-real competition days)
-// Note: script runs at end of <body> so DOM is already available — no DOMContentLoaded needed
+// Effective competition mode: real competition day (PHP) OR test override (sessionStorage)
+// COMPETITION_MODE is const from PHP — use effectiveCompMode throughout
+let effectiveCompMode = COMPETITION_MODE;
 if (!COMPETITION_MODE && sessionStorage.getItem('competitionTestMode') === '1') {
-    COMPETITION_MODE = true;
+    effectiveCompMode = true;
     document.querySelector('.container').classList.add('competition-mode');
     const banner = document.getElementById('testCompBanner');
     if (banner) banner.style.display = '';
@@ -61,7 +62,7 @@ studentButtons.forEach(button => {
         writeTagBtn.style.display = 'none';
 
         // Update confirm button text based on status and mode
-        if (COMPETITION_MODE) {
+        if (effectiveCompMode) {
             confirmBtn.textContent = 'Check In';
             confirmBtn.className = 'action-button confirm sign-in';
         } else if (selectedStudentStatus === 'in') {
@@ -118,7 +119,7 @@ confirmBtn.addEventListener('click', function() {
     }
 
     // Determine action based on current status (competition days are always 'in')
-    let action = (COMPETITION_MODE || selectedStudentStatus !== 'in') ? 'in' : 'out';
+    let action = (effectiveCompMode || selectedStudentStatus !== 'in') ? 'in' : 'out';
     recordAttendance(selectedStudentId, action);
 });
 
@@ -340,7 +341,7 @@ function handleTagScan(studentId) {
 
     // Determine current status and toggle (competition days always check in)
     const currentStatus = button.getAttribute('data-status');
-    const action = (COMPETITION_MODE || currentStatus !== 'in') ? 'in' : 'out';
+    const action = (effectiveCompMode || currentStatus !== 'in') ? 'in' : 'out';
 
     // Briefly highlight the student in the roster
     button.classList.add('selected');
@@ -388,7 +389,7 @@ if (testCompModeBtn) {
 // Competition Mode: Countdown Timers
 // ---------------------------------------------------------------------------
 
-if (COMPETITION_MODE) {
+if (effectiveCompMode) {
     function updateCompetitionTimers() {
         const now = Math.floor(Date.now() / 1000);
         document.querySelectorAll('.roster-item').forEach(button => {
