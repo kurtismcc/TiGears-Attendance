@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS attendance_windows (
     CONSTRAINT chk_times CHECK (start_time < end_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Competition days table
+-- Days marked here run in competition mode: check-in only, hourly timer per student
+CREATE TABLE IF NOT EXISTS competition_days (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    date DATE NOT NULL,
+    label VARCHAR(100) NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_date (date),
+    INDEX idx_date (date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Sample data (optional - remove or modify as needed)
 INSERT INTO students (student_id, name) VALUES
 ('1001', 'John Smith'),

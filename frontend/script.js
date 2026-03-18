@@ -1,3 +1,17 @@
+// Activate test competition mode if toggled (only on non-real competition days)
+if (!COMPETITION_MODE && sessionStorage.getItem('competitionTestMode') === '1') {
+    COMPETITION_MODE = true;
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelector('.container').classList.add('competition-mode');
+        const banner = document.getElementById('testCompBanner');
+        if (banner) banner.style.display = '';
+        const btn = document.getElementById('testCompModeBtn');
+        if (btn) btn.classList.add('active');
+        const rosterTitle = document.querySelector('.roster-title');
+        if (rosterTitle) rosterTitle.textContent = 'Competition Check-Ins (Test)';
+    });
+}
+
 // Global variables
 let selectedStudentId = null;
 let selectedStudentButton = null;
@@ -47,8 +61,11 @@ studentButtons.forEach(button => {
         studentRoster.style.display = 'none';
         writeTagBtn.style.display = 'none';
 
-        // Update confirm button text based on status
-        if (selectedStudentStatus === 'in') {
+        // Update confirm button text based on status and mode
+        if (COMPETITION_MODE) {
+            confirmBtn.textContent = 'Check In';
+            confirmBtn.className = 'action-button confirm sign-in';
+        } else if (selectedStudentStatus === 'in') {
             confirmBtn.textContent = 'Confirm Sign Out';
             confirmBtn.className = 'action-button confirm sign-out';
         } else {
@@ -101,8 +118,8 @@ confirmBtn.addEventListener('click', function() {
         return;
     }
 
-    // Determine action based on current status
-    let action = (selectedStudentStatus === 'in') ? 'out' : 'in';
+    // Determine action based on current status (competition days are always 'in')
+    let action = (COMPETITION_MODE || selectedStudentStatus !== 'in') ? 'in' : 'out';
     recordAttendance(selectedStudentId, action);
 });
 
@@ -322,10 +339,9 @@ function handleTagScan(studentId) {
         return;
     }
 
-    // Determine current status and toggle
+    // Determine current status and toggle (competition days always check in)
     const currentStatus = button.getAttribute('data-status');
-    const action = (currentStatus === 'in') ? 'out' : 'in';
-    const studentName = button.querySelector('.roster-name').textContent;
+    const action = (COMPETITION_MODE || currentStatus !== 'in') ? 'in' : 'out';
 
     // Briefly highlight the student in the roster
     button.classList.add('selected');
@@ -352,3 +368,64 @@ function handleWriteComplete(success, studentId) {
 
 // Start NFC connection on page load
 connectNfc();
+
+// ---------------------------------------------------------------------------
+// Test Competition Mode toggle
+// ---------------------------------------------------------------------------
+
+const testCompModeBtn = document.getElementById('testCompModeBtn');
+if (testCompModeBtn) {
+    testCompModeBtn.addEventListener('click', function() {
+        if (sessionStorage.getItem('competitionTestMode') === '1') {
+            sessionStorage.removeItem('competitionTestMode');
+        } else {
+            sessionStorage.setItem('competitionTestMode', '1');
+        }
+        window.location.reload();
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Competition Mode: Countdown Timers
+// ---------------------------------------------------------------------------
+
+if (COMPETITION_MODE) {
+    function updateCompetitionTimers() {
+        const now = Math.floor(Date.now() / 1000);
+        document.querySelectorAll('.roster-item').forEach(button => {
+            const timerEl = button.querySelector('.roster-timer');
+            if (!timerEl) return;
+
+            const lastCheckin = parseInt(button.dataset.lastCheckin) || 0;
+
+            if (!lastCheckin) {
+                timerEl.textContent = 'Not checked in';
+                timerEl.className = 'roster-timer timer-none';
+                return;
+            }
+
+            const elapsed = now - lastCheckin;
+            const remaining = 3600 - elapsed;
+
+            if (remaining > 0) {
+                const mins = Math.floor(remaining / 60);
+                const secs = remaining % 60;
+                timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                // Color based on urgency
+                if (remaining > 900) {
+                    timerEl.className = 'roster-timer timer-ok';
+                } else if (remaining > 300) {
+                    timerEl.className = 'roster-timer timer-warn';
+                } else {
+                    timerEl.className = 'roster-timer timer-urgent';
+                }
+            } else {
+                timerEl.textContent = 'OVERDUE';
+                timerEl.className = 'roster-timer timer-overdue';
+            }
+        });
+    }
+
+    updateCompetitionTimers();
+    setInterval(updateCompetitionTimers, 1000);
+}

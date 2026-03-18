@@ -8,6 +8,13 @@ while ($row = $result->fetch_assoc()) {
     $windows[] = $row;
 }
 
+// Get all competition days
+$compResult = $conn->query("SELECT id, date, label FROM competition_days ORDER BY date DESC");
+$competitionDays = [];
+while ($row = $compResult->fetch_assoc()) {
+    $competitionDays[] = $row;
+}
+
 // Day names for display
 $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 ?>
@@ -251,6 +258,44 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
         </div>
 
         <div class="admin-section">
+            <h2 class="section-title">Competition Days</h2>
+            <div class="section-content">
+                <p style="margin-bottom:15px; color:#555;">On competition days, students check in every hour. Normal attendance streaks ignore these days.</p>
+                <form id="addCompDayForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="compDate">Date</label>
+                            <input type="date" id="compDate" name="date" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="compLabel">Label (optional)</label>
+                            <input type="text" id="compLabel" name="label" placeholder="e.g. Regional Championship" style="min-width:220px;">
+                        </div>
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <button type="submit" class="btn btn-primary">Add Competition Day</button>
+                        </div>
+                    </div>
+                </form>
+                <div class="window-list" id="compDayList">
+                    <?php if (empty($competitionDays)): ?>
+                        <p class="empty-message">No competition days configured yet.</p>
+                    <?php else: ?>
+                        <?php foreach ($competitionDays as $day): ?>
+                            <div class="window-item" data-id="<?php echo $day['id']; ?>">
+                                <div class="window-info">
+                                    <span class="window-day" style="color:#e67e22;"><?php echo htmlspecialchars($day['date']); ?></span>
+                                    <span class="window-time"><?php echo htmlspecialchars($day['label'] ?: '(no label)'); ?></span>
+                                </div>
+                                <button class="btn btn-danger delete-comp-btn" data-id="<?php echo $day['id']; ?>">Delete</button>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <div class="admin-section">
             <h2 class="section-title">Current Windows</h2>
             <div class="section-content">
                 <div class="window-list" id="windowList">
@@ -360,6 +405,80 @@ $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', '
                     this.reset();
                 } else {
                     showMessage(data.message || 'Failed to add window', 'error');
+                }
+            } catch (err) {
+                showMessage('Network error: ' + err.message, 'error');
+            }
+        });
+
+        // Add competition day
+        document.getElementById('addCompDayForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const date = document.getElementById('compDate').value;
+            const label = document.getElementById('compLabel').value;
+
+            try {
+                const response = await fetch('../backend/competition_days.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date, label })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('Competition day added!', 'success');
+
+                    const list = document.getElementById('compDayList');
+                    const emptyMsg = list.querySelector('.empty-message');
+                    if (emptyMsg) emptyMsg.remove();
+
+                    const item = document.createElement('div');
+                    item.className = 'window-item';
+                    item.dataset.id = data.id;
+                    item.innerHTML = `
+                        <div class="window-info">
+                            <span class="window-day" style="color:#e67e22;">${date}</span>
+                            <span class="window-time">${label || '(no label)'}</span>
+                        </div>
+                        <button class="btn btn-danger delete-comp-btn" data-id="${data.id}">Delete</button>
+                    `;
+                    list.prepend(item);
+                    this.reset();
+                } else {
+                    showMessage(data.message || 'Failed to add competition day', 'error');
+                }
+            } catch (err) {
+                showMessage('Network error: ' + err.message, 'error');
+            }
+        });
+
+        // Delete competition day
+        document.getElementById('compDayList').addEventListener('click', async function(e) {
+            if (!e.target.classList.contains('delete-comp-btn')) return;
+
+            const id = e.target.dataset.id;
+            if (!confirm('Remove this competition day?')) return;
+
+            try {
+                const response = await fetch(`../backend/competition_days.php?id=${id}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('Competition day removed.', 'success');
+                    const item = document.querySelector(`#compDayList .window-item[data-id="${id}"]`);
+                    if (item) item.remove();
+
+                    const list = document.getElementById('compDayList');
+                    if (list.children.length === 0) {
+                        list.innerHTML = '<p class="empty-message">No competition days configured yet.</p>';
+                    }
+                } else {
+                    showMessage(data.message || 'Failed to remove', 'error');
                 }
             } catch (err) {
                 showMessage('Network error: ' + err.message, 'error');

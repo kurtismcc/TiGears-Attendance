@@ -346,8 +346,24 @@ function loadTransformedData($conn) {
         $endDate = date('Y-m-d');
     }
 
+    // Load competition days - these are excluded from normal attendance tracking
+    $competitionDates = [];
+    $compResult = $conn->query("SELECT date FROM competition_days");
+    if ($compResult && $compResult->num_rows > 0) {
+        while ($row = $compResult->fetch_assoc()) {
+            $competitionDates[$row['date']] = true;
+        }
+    }
+
     // Generate all window occurrences
     $allOccurrences = generateWindowOccurrences($windows, $startDate, $endDate);
+
+    // Exclude competition days from window occurrences so they don't break streaks
+    if (!empty($competitionDates)) {
+        $allOccurrences = array_values(array_filter($allOccurrences, function($occ) use ($competitionDates) {
+            return !isset($competitionDates[$occ['date']]);
+        }));
+    }
 
     // Filter to only completed windows for award calculations
     $completedOccurrences = array_values(getCompletedWindows($allOccurrences));

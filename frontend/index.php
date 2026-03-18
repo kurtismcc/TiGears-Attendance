@@ -12,14 +12,21 @@ $today = date('Y-m-d');
 $todayDayOfWeek = date('w'); // 0 = Sunday, 6 = Saturday
 $now = time();
 
-// Get today's window (if any)
-$windowResult = $conn->query("SELECT start_time, end_time FROM attendance_windows WHERE day_of_week = $todayDayOfWeek AND valid_from <= '$today' AND valid_to >= '$today' LIMIT 1");
-$todayWindow = $windowResult->fetch_assoc();
-$isPastWindow = false;
+// Check if today is a competition day
+$compResult = $conn->query("SELECT label FROM competition_days WHERE date = '$today' LIMIT 1");
+$competitionDay = ($compResult && $compResult->num_rows > 0) ? $compResult->fetch_assoc() : null;
+$isCompetitionDay = ($competitionDay !== null);
+$competitionLabel = $isCompetitionDay ? $competitionDay['label'] : '';
 
-if ($todayWindow) {
-    $windowEnd = strtotime($today . ' ' . $todayWindow['end_time']);
-    $isPastWindow = ($now > $windowEnd);
+// Get today's window (if any) - skip for competition days
+$isPastWindow = false;
+if (!$isCompetitionDay) {
+    $windowResult = $conn->query("SELECT start_time, end_time FROM attendance_windows WHERE day_of_week = $todayDayOfWeek AND valid_from <= '$today' AND valid_to >= '$today' LIMIT 1");
+    $todayWindow = $windowResult->fetch_assoc();
+    if ($todayWindow) {
+        $windowEnd = strtotime($today . ' ' . $todayWindow['end_time']);
+        $isPastWindow = ($now > $windowEnd);
+    }
 }
 
 // Query to get all students with their TODAY's sign-in status
@@ -72,19 +79,30 @@ if ($result->num_rows > 0) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Auto-refresh every 5 minutes to update awards (computed for completed windows only) -->
+    <?php if (!$isCompetitionDay): ?>
     <meta http-equiv="refresh" content="300">
+    <?php endif; ?>
     <title>Robotics Team Attendance</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
+    <div class="container<?php echo $isCompetitionDay ? ' competition-mode' : ''; ?>">
         <div class="header">
             <img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo">
             <h1>TiGears - Attendance Tracker</h1>
             <a href="admin.php"><img src="assets/Logo.jpg" alt="TiGears Logo" class="header-logo"></a>
             <span class="nfc-status disconnected" id="nfcStatus" title="NFC Reader Disconnected"></span>
         </div>
+        <?php if ($isCompetitionDay): ?>
+        <div class="competition-banner">
+            <span class="competition-banner-icon">&#127942;</span>
+            COMPETITION DAY<?php if ($competitionLabel): ?> &mdash; <?php echo htmlspecialchars($competitionLabel); ?><?php endif; ?>
+            <span class="competition-banner-icon">&#127942;</span>
+        </div>
+        <p class="instructions">Tap your name to check in &mdash; check in every hour!</p>
+        <?php else: ?>
         <p class="instructions">Tap your name and then tap Sign In or Sign Out</p>
+        <?php endif; ?>
 
         <!-- Awards Section -->
         <div class="awards-section">
@@ -162,8 +180,8 @@ if ($result->num_rows > 0) {
         ?>
         <div class="student-roster">
             <div class="roster-header">
-                <h2 class="roster-title">Today's Attendance</h2>
-                <span class="roster-count"><?php echo $signedInCount; ?> / <?php echo count($all_students); ?> signed in</span>
+                <h2 class="roster-title"><?php echo $isCompetitionDay ? 'Competition Check-Ins' : "Today's Attendance"; ?></h2>
+                <span class="roster-count"><?php echo $signedInCount; ?> / <?php echo count($all_students); ?> <?php echo $isCompetitionDay ? 'checked in' : 'signed in'; ?></span>
             </div>
             <div class="roster-grid">
                 <?php
@@ -172,9 +190,12 @@ if ($result->num_rows > 0) {
                         $statusClass = $student['is_signed_in'] ? 'signed-in' : 'signed-out';
                         $statusIcon = $student['is_signed_in'] ? '&#10004;' : '&#10008;';
                         $dataStatus = $student['is_signed_in'] ? 'in' : 'out';
-                        echo '<button class="roster-item ' . $statusClass . '" data-student-id="' . htmlspecialchars($student['student_id']) . '" data-status="' . $dataStatus . '">';
+                        $lastCheckin = ($student['last_timestamp'] && $student['last_action'] === 'in')
+                            ? strtotime($student['last_timestamp']) : 0;
+                        echo '<button class="roster-item ' . $statusClass . '" data-student-id="' . htmlspecialchars($student['student_id']) . '" data-status="' . $dataStatus . '" data-last-checkin="' . $lastCheckin . '">';
                         echo '<span class="roster-icon">' . $statusIcon . '</span>';
                         echo '<span class="roster-name">' . htmlspecialchars($student['name']) . '</span>';
+                        echo '<span class="roster-timer"></span>';
                         echo '</button>';
                     }
                 } else {
@@ -185,6 +206,15 @@ if ($result->num_rows > 0) {
         </div>
     </div>
 
+    <?php if (!$isCompetitionDay): ?>
+    <button id="testCompModeBtn" class="test-comp-mode-btn" title="Toggle competition mode for testing"></button>
+    <div class="competition-banner competition-test-banner" id="testCompBanner" style="display:none;">
+        <span class="competition-banner-icon">&#127942;</span>
+        TEST MODE &mdash; Competition Day Simulation
+        <span class="competition-banner-icon">&#127942;</span>
+    </div>
+    <?php endif; ?>
+    <script>const COMPETITION_MODE = <?php echo $isCompetitionDay ? 'true' : 'false'; ?>;</script>
     <script src="script.js"></script>
 </body>
 </html>
