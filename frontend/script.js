@@ -1,15 +1,14 @@
 // Activate test competition mode if toggled (only on non-real competition days)
+// Note: script runs at end of <body> so DOM is already available — no DOMContentLoaded needed
 if (!COMPETITION_MODE && sessionStorage.getItem('competitionTestMode') === '1') {
     COMPETITION_MODE = true;
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelector('.container').classList.add('competition-mode');
-        const banner = document.getElementById('testCompBanner');
-        if (banner) banner.style.display = '';
-        const btn = document.getElementById('testCompModeBtn');
-        if (btn) btn.classList.add('active');
-        const rosterTitle = document.querySelector('.roster-title');
-        if (rosterTitle) rosterTitle.textContent = 'Competition Check-Ins (Test)';
-    });
+    document.querySelector('.container').classList.add('competition-mode');
+    const banner = document.getElementById('testCompBanner');
+    if (banner) banner.style.display = '';
+    const btn = document.getElementById('testCompModeBtn');
+    if (btn) btn.classList.add('active');
+    const rosterTitle = document.querySelector('.roster-title');
+    if (rosterTitle) rosterTitle.textContent = 'Competition Check-Ins (Test)';
 }
 
 // Global variables
